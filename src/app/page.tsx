@@ -195,33 +195,68 @@ export default function App() {
   // Not authenticated screen (Premium Login/Sign Up)
   if (!user) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-brand-950 flex items-center justify-center p-4 relative overflow-hidden">
-        {/* Background ambient glows */}
-        <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-brand-500/10 blur-[120px] pointer-events-none" />
-        <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-sky-500/10 blur-[120px] pointer-events-none" />
+      <div className="min-h-screen bg-gradient-to-br from-[#060814] via-[#090b22] to-[#13072c] flex items-center justify-center p-4 relative overflow-hidden">
+        {/* Dynamic, Fluid Background Blobs matching reference colors */}
+        {/* Blob 1: Neon Cyan/Teal (Top Right) */}
+        <div className="absolute -top-12 -right-12 w-[450px] h-[450px] rounded-full bg-gradient-to-tr from-cyan-500/25 to-teal-400/20 blur-[110px] pointer-events-none animate-pulse-slow" />
+        
+        {/* Blob 2: Vibrant Violet/Fuchsia (Left Center) */}
+        <div className="absolute top-[20%] -left-20 w-[400px] h-[400px] rounded-full bg-gradient-to-br from-fuchsia-600/20 to-purple-600/25 blur-[120px] pointer-events-none animate-float-1" />
+        
+        {/* Blob 3: Deep Royal Blue/Purple (Bottom Right) */}
+        <div className="absolute -bottom-24 right-4 w-[500px] h-[500px] rounded-full bg-gradient-to-tr from-blue-600/20 via-indigo-600/20 to-purple-500/25 blur-[130px] pointer-events-none animate-float-2" />
+        
+        {/* Blob 4: Neon Pink/Purple (Bottom Left) */}
+        <div className="absolute -bottom-16 -left-16 w-80 h-80 rounded-full bg-gradient-to-br from-pink-500/15 to-indigo-500/20 blur-[90px] pointer-events-none animate-pulse-slow" />
 
-        <div className="w-full max-w-md bg-white/5 backdrop-blur-xl border border-white/10 shadow-2xl rounded-3xl p-8 relative z-10 transition-all duration-300">
+        {/* Decorative Floating Glass Shapes (recreating the user's reference image) */}
+        {/* Shape 1: Top Left Glass Leaf */}
+        <div className="absolute top-[10%] left-[8%] w-48 h-48 rounded-br-[70px] rounded-tl-[70px] bg-white/[0.02] backdrop-blur-md border border-white/[0.08] shadow-2xl rotate-[15deg] pointer-events-none animate-float-1" />
+        
+        {/* Shape 2: Center Right Large Glass Triangle/Leaf */}
+        <div className="absolute top-[25%] -right-16 w-80 h-80 rounded-bl-[120px] rounded-tr-[120px] bg-white/[0.015] backdrop-blur-[12px] border border-white/[0.06] shadow-2xl rotate-[-25deg] pointer-events-none animate-float-2" />
+        
+        {/* Shape 3: Bottom Left Glass Sphere */}
+        <div className="absolute bottom-[8%] left-[6%] w-56 h-56 rounded-full bg-gradient-to-br from-white/[0.04] to-transparent backdrop-blur-lg border border-white/[0.12] shadow-2xl pointer-events-none animate-float-3" />
+        
+        {/* Shape 4: Bottom Right Glass Triangle/Leaf */}
+        <div className="absolute bottom-[10%] right-[8%] w-64 h-64 rounded-br-[100px] rounded-tl-[100px] bg-white/[0.02] backdrop-blur-md border border-white/[0.08] shadow-2xl rotate-[38deg] pointer-events-none animate-float-1" />
+
+        {/* Glassmorphic Login Card */}
+        <div className="w-full max-w-md bg-white/[0.03] backdrop-blur-2xl border border-white/[0.08] shadow-[0_32px_64px_rgba(0,0,0,0.5),inset_0_1px_2px_rgba(255,255,255,0.12)] rounded-[32px] p-8 md:p-10 relative z-10 transition-all duration-500 hover:border-white/[0.14] hover:shadow-[0_32px_80px_rgba(0,0,0,0.65)] group/card">
+          
+          {/* Subtle light glare reflect effect on hover */}
+          <div className="absolute inset-0 rounded-[32px] bg-gradient-to-tr from-transparent via-white/[0.02] to-white/[0.05] pointer-events-none opacity-0 group-hover/card:opacity-100 transition-opacity duration-700" />
           
           {/* Brand/Header */}
-          <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center p-3 rounded-2xl bg-gradient-to-tr from-brand-500 to-sky-400 shadow-lg shadow-brand-500/20 mb-4 animate-bounce-slow">
-              <UploadCloud className="h-8 w-8 text-white" />
+          <div className="text-center mb-8 relative">
+            <div className="relative inline-flex items-center justify-center mb-5 group">
+              {/* Outer pulsing neon glow */}
+              <div className="absolute inset-0 rounded-2xl bg-gradient-to-tr from-cyan-500 to-fuchsia-600 blur-lg opacity-40 group-hover:opacity-75 transition-opacity duration-300 animate-pulse" />
+              {/* Main glass icon box */}
+              <div className="relative p-4 rounded-2xl bg-white/[0.06] backdrop-blur-md border border-white/20 shadow-lg flex items-center justify-center transform group-hover:scale-105 transition-transform duration-300">
+                <UploadCloud className="h-8 w-8 text-cyan-400" />
+              </div>
             </div>
-            <h1 className="text-2xl font-bold text-white tracking-tight">FDCP S3 Uploader</h1>
-            <p className="text-slate-400 text-sm mt-1">Please sign in to access the image uploader</p>
+            <h1 className="text-3xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-white via-slate-100 to-slate-300">
+              FDCP S3 Uploader
+            </h1>
+            <p className="text-slate-400 text-sm mt-2.5 font-light tracking-wide">
+              Securely authenticate to access the uploader system
+            </p>
           </div>
 
-          {/* Form switch tab */}
-          <div className="flex p-1 bg-slate-950/40 rounded-2xl border border-white/5 mb-6">
+          {/* Premium Glass Switch Tab */}
+          <div className="flex p-1.5 bg-black/40 rounded-2xl border border-white/5 mb-8 relative">
             <button
               onClick={() => {
                 setAuthMode('signin');
                 setAuthError(null);
                 setAuthSuccess(null);
               }}
-              className={`flex-1 py-2 text-sm font-semibold rounded-xl transition-all duration-300 ${
+              className={`flex-1 py-3 text-sm font-semibold rounded-xl transition-all duration-300 ${
                 authMode === 'signin'
-                  ? 'bg-gradient-to-r from-brand-500 to-sky-500 text-white shadow-md'
+                  ? 'bg-white/[0.08] backdrop-blur-md border border-white/[0.1] text-white shadow-[0_2px_12px_rgba(255,255,255,0.05)]'
                   : 'text-slate-400 hover:text-slate-200 cursor-pointer'
               }`}
             >
@@ -233,9 +268,9 @@ export default function App() {
                 setAuthError(null);
                 setAuthSuccess(null);
               }}
-              className={`flex-1 py-2 text-sm font-semibold rounded-xl transition-all duration-300 ${
+              className={`flex-1 py-3 text-sm font-semibold rounded-xl transition-all duration-300 ${
                 authMode === 'signup'
-                  ? 'bg-gradient-to-r from-brand-500 to-sky-500 text-white shadow-md'
+                  ? 'bg-white/[0.08] backdrop-blur-md border border-white/[0.1] text-white shadow-[0_2px_12px_rgba(255,255,255,0.05)]'
                   : 'text-slate-400 hover:text-slate-200 cursor-pointer'
               }`}
             >
@@ -245,56 +280,56 @@ export default function App() {
 
           {/* Alert Messages */}
           {authError && (
-            <div className="flex items-center space-x-2 p-3.5 bg-red-500/10 border border-red-500/20 text-red-200 text-sm rounded-xl mb-4 animate-shake">
-              <AlertCircle className="h-4 w-4 text-red-400 flex-shrink-0" />
-              <span>{authError}</span>
+            <div className="flex items-center space-x-3 p-4 bg-red-500/10 border border-red-500/20 text-red-200 text-xs rounded-2xl mb-6 backdrop-blur-md animate-shake">
+              <AlertCircle className="h-4.5 w-4.5 text-red-400 flex-shrink-0" />
+              <span className="font-medium tracking-wide">{authError}</span>
             </div>
           )}
 
           {authSuccess && (
-            <div className="flex items-center space-x-2 p-3.5 bg-green-500/10 border border-green-500/20 text-green-200 text-sm rounded-xl mb-4 animate-fade-in">
-              <CheckCircle className="h-4 w-4 text-green-400 flex-shrink-0" />
-              <span>{authSuccess}</span>
+            <div className="flex items-center space-x-3 p-4 bg-green-500/10 border border-green-500/20 text-green-200 text-xs rounded-2xl mb-6 backdrop-blur-md animate-fade-in">
+              <CheckCircle className="h-4.5 w-4.5 text-green-400 flex-shrink-0" />
+              <span className="font-medium tracking-wide">{authSuccess}</span>
             </div>
           )}
 
           {/* Form */}
-          <form onSubmit={handleAuthSubmit} className="space-y-4">
+          <form onSubmit={handleAuthSubmit} className="space-y-5">
             <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2.5 ml-1">
                 Email Address
               </label>
-              <div className="relative">
-                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-500" />
+              <div className="relative group">
+                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-500 group-focus-within:text-cyan-400 transition-colors duration-300" />
                 <input
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="name@company.com"
-                  className="w-full pl-12 pr-4 py-3 bg-slate-950/30 border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-all duration-200"
+                  className="w-full pl-12 pr-4 py-3.5 bg-black/25 focus:bg-black/40 border border-white/[0.08] focus:border-cyan-400 focus:ring-4 focus:ring-cyan-500/10 rounded-2xl text-white placeholder-slate-500 focus:outline-none transition-all duration-300 backdrop-blur-md text-[15px]"
                   required
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2.5 ml-1">
                 Password
               </label>
-              <div className="relative">
-                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-500" />
+              <div className="relative group">
+                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-500 group-focus-within:text-cyan-400 transition-colors duration-300" />
                 <input
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full pl-12 pr-12 py-3 bg-slate-950/30 border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-all duration-200"
+                  className="w-full pl-12 pr-12 py-3.5 bg-black/25 focus:bg-black/40 border border-white/[0.08] focus:border-cyan-400 focus:ring-4 focus:ring-cyan-500/10 rounded-2xl text-white placeholder-slate-500 focus:outline-none transition-all duration-300 backdrop-blur-md text-[15px]"
                   required
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 focus:outline-none cursor-pointer"
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 focus:outline-none cursor-pointer transition-colors duration-200"
                 >
                   {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
                 </button>
@@ -303,17 +338,17 @@ export default function App() {
 
             {authMode === 'signup' && (
               <div className="animate-fade-in">
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2.5 ml-1">
                   Confirm Password
                 </label>
-                <div className="relative">
-                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-500" />
+                <div className="relative group">
+                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-500 group-focus-within:text-cyan-400 transition-colors duration-300" />
                   <input
                     type={showPassword ? 'text' : 'password'}
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     placeholder="••••••••"
-                    className="w-full pl-12 pr-12 py-3 bg-slate-950/30 border border-white/10 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-all duration-200"
+                    className="w-full pl-12 pr-12 py-3.5 bg-black/25 focus:bg-black/40 border border-white/[0.08] focus:border-cyan-400 focus:ring-4 focus:ring-cyan-500/10 rounded-2xl text-white placeholder-slate-500 focus:outline-none transition-all duration-300 backdrop-blur-md text-[15px]"
                     required
                   />
                 </div>
@@ -323,12 +358,14 @@ export default function App() {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full py-3 mt-4 bg-gradient-to-r from-brand-500 to-sky-500 hover:from-brand-600 hover:to-sky-600 text-white font-semibold rounded-xl shadow-lg shadow-brand-500/20 active:scale-[0.98] transition-all duration-200 flex items-center justify-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              className="w-full py-4 mt-6 bg-gradient-to-r from-cyan-500 via-blue-500 to-purple-600 hover:from-cyan-400 hover:via-blue-400 hover:to-purple-500 text-white font-bold tracking-wide rounded-2xl shadow-[0_12px_30px_rgba(6,182,212,0.25)] hover:shadow-[0_12px_35px_rgba(6,182,212,0.45)] hover:scale-[1.01] active:scale-[0.99] transition-all duration-300 flex items-center justify-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             >
               {isLoading ? (
-                <Loader2 className="h-5 w-5 animate-spin" />
+                <Loader2 className="h-5 w-5 animate-spin text-white" />
               ) : (
-                <span>{authMode === 'signin' ? 'Sign In' : 'Create Account'}</span>
+                <span className="flex items-center space-x-2">
+                  <span>{authMode === 'signin' ? 'Sign In' : 'Create Account'}</span>
+                </span>
               )}
             </button>
           </form>
