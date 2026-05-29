@@ -192,7 +192,7 @@ export default function App() {
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const [copiedAll, setCopiedAll] = useState<'newline' | 'comma' | null>(null);
 
-  //copy fixes
+  //copy fixesdsadsadasda
   const fallbackCopy = (text: string) => {
     const textArea = document.createElement("textarea");
     textArea.value = text;
