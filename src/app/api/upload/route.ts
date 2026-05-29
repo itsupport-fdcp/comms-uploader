@@ -12,7 +12,7 @@ function sanitizeFilename(filename: string): string {
 
 export async function POST(request: Request) {
   try {
-    const { filename, contentType: providedContentType, title } = await request.json();
+    const { filename, contentType: providedContentType } = await request.json();
 
     if (!filename) {
       return NextResponse.json(
@@ -46,14 +46,11 @@ export async function POST(request: Request) {
     });
 
     const sanitizedName = sanitizeFilename(filename);
-    const titleSlug = title ? sanitizeFilename(title) : '';
 
     const now = new Date();
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, '0');
-    const folder = titleSlug 
-      ? `uploads/${year}-${month}/${titleSlug}/`
-      : `uploads/${year}-${month}/`;
+    const folder = `uploads/${year}-${month}/`;
     const key = `${folder}${Date.now()}-${sanitizedName}`;
 
     // Lookup mime type using file type or file name

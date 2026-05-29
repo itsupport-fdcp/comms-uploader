@@ -41,7 +41,6 @@ export default function App() {
 
   const [isUploading, setIsUploading] = useState(false);
   const [uploads, setUploads] = useState<any[]>([]);
-  const [uploadTitle, setUploadTitle] = useState('');
 
   // Monitor Firebase Auth state changes
   useEffect(() => {
@@ -134,7 +133,6 @@ export default function App() {
           body: JSON.stringify({
             filename: file.name,
             contentType: file.type,
-            title: uploadTitle,
           }),
         });
         
@@ -179,7 +177,7 @@ export default function App() {
     }
     
     setIsUploading(false);
-  }, [user, uploadTitle]);
+  }, [user]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({ 
     onDrop,
@@ -430,23 +428,6 @@ export default function App() {
           <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight mb-2">FDCP Image Uploader</h1>
           <p className="text-slate-500 text-sm">Securely upload media to Amazon S3 and generate public URLs</p>
         </header>
-
-        {/* Title Input */}
-        <div className="mb-6 animate-fade-in">
-          <label className="block text-sm font-bold text-slate-700 mb-2">
-            Content Title (Optional)
-          </label>
-          <input
-            type="text"
-            value={uploadTitle}
-            onChange={(e) => setUploadTitle(e.target.value)}
-            placeholder="e.g. Hello Love Again"
-            className="w-full px-4 py-3 bg-white border border-slate-200 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 rounded-xl text-slate-800 placeholder-slate-400 focus:outline-none transition-all duration-200 shadow-sm"
-          />
-          <p className="text-xs text-slate-500 mt-1.5">
-            This will be used to organize your uploads into folders (e.g. uploads/2026-05/hello-love-again/filename.mp4)
-          </p>
-        </div>
 
         {/* Upload Zone */}
         <div 
