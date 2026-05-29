@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { lookup as mimeLookup } from 'mime-types';
 
 function sanitizeFilename(filename: string): string {
@@ -11,12 +12,11 @@ function sanitizeFilename(filename: string): string {
 
 export async function POST(request: Request) {
   try {
-    const formData = await request.formData();
-    const file = formData.get('file') as File | null;
+    const { filename, contentType: providedContentType, title } = await request.json();
 
-    if (!file) {
+    if (!filename) {
       return NextResponse.json(
-        { success: false, error: 'No file uploaded' },
+        { success: false, error: 'No filename provided' },
         { status: 400 }
       );
     }
@@ -45,40 +45,41 @@ export async function POST(request: Request) {
       },
     });
 
-    const arrayBuffer = await file.arrayBuffer();
-    const fileContent = Buffer.from(arrayBuffer);
-    const sanitizedName = sanitizeFilename(file.name);
+    const sanitizedName = sanitizeFilename(filename);
+    const titleSlug = title ? sanitizeFilename(title) : '';
 
     const now = new Date();
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, '0');
-    const folder = `uploads/${year}-${month}/`;
+    const folder = titleSlug 
+      ? `uploads/${year}-${month}/${titleSlug}/`
+      : `uploads/${year}-${month}/`;
     const key = `${folder}${Date.now()}-${sanitizedName}`;
 
     // Lookup mime type using file type or file name
-    const contentType = file.type || mimeLookup(file.name) || 'application/octet-stream';
+    const contentType = providedContentType || mimeLookup(filename) || 'application/octet-stream';
 
     const command = new PutObjectCommand({
       Bucket: bucket,
       Key: key,
-      Body: fileContent,
       ContentType: contentType,
       ContentDisposition: 'inline',
     });
 
-    await s3Client.send(command);
-
+    // Generate the presigned URL valid for 1 hour
+    const presignedUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
     const publicUrl = `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
 
     return NextResponse.json({
       success: true,
+      presignedUrl,
       url: publicUrl,
       filename: sanitizedName,
     });
   } catch (error: any) {
-    console.error('Upload Error:', error);
+    console.error('Presign Error:', error);
     return NextResponse.json(
-      { success: false, error: error.message || 'An error occurred during file upload.' },
+      { success: false, error: error.message || 'An error occurred generating the upload URL.' },
       { status: 500 }
     );
   }

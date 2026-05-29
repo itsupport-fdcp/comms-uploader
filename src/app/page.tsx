@@ -41,6 +41,7 @@ export default function App() {
 
   const [isUploading, setIsUploading] = useState(false);
   const [uploads, setUploads] = useState<any[]>([]);
+  const [uploadTitle, setUploadTitle] = useState('');
 
   // Monitor Firebase Auth state changes
   useEffect(() => {
@@ -124,28 +125,52 @@ export default function App() {
     
     for (const file of acceptedFiles) {
       try {
-        const formData = new FormData();
-        formData.append('file', file);
-        
-        // POST to our secure serverless endpoint
-        const res = await fetch('/api/upload', {
+        // Step 1: Request a Presigned URL
+        const presignRes = await fetch('/api/upload', {
           method: 'POST',
-          body: formData,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            filename: file.name,
+            contentType: file.type,
+            title: uploadTitle,
+          }),
         });
         
-        const response = await res.json();
+        const presignResponse = await presignRes.json();
         
-        if (response.success) {
-          setUploads(prev => [{
-            url: response.url,
-            filename: response.filename,
-            originalName: file.name
-          }, ...prev]);
-        } else {
-          console.error("Upload failed:", response.error);
-          setAuthError(`Upload failed: ${response.error}`);
+        if (!presignRes.ok || !presignResponse.success) {
+          console.error("Presign failed:", presignResponse.error);
+          setAuthError(`Upload failed: ${presignResponse.error}`);
           setTimeout(() => setAuthError(null), 5000);
+          continue;
         }
+
+        const { presignedUrl, url: publicUrl, filename } = presignResponse;
+
+        // Step 2: Upload directly to S3 using the Presigned URL
+        const uploadRes = await fetch(presignedUrl, {
+          method: 'PUT',
+          body: file,
+          headers: {
+            'Content-Type': file.type || 'application/octet-stream',
+          },
+        });
+
+        if (!uploadRes.ok) {
+          console.error("Direct upload failed:", uploadRes.statusText);
+          setAuthError(`Direct upload failed: ${uploadRes.statusText}`);
+          setTimeout(() => setAuthError(null), 5000);
+          continue;
+        }
+
+        // Step 3: Successfully uploaded
+        setUploads(prev => [{
+          url: publicUrl,
+          filename: filename,
+          originalName: file.name
+        }, ...prev]);
       } catch (error: any) {
         console.error("Error invoking upload:", error);
         setAuthError(`Error uploading file: ${error.message || error}`);
@@ -154,7 +179,7 @@ export default function App() {
     }
     
     setIsUploading(false);
-  }, [user]);
+  }, [user, uploadTitle]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({ 
     onDrop,
@@ -405,6 +430,23 @@ export default function App() {
           <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight mb-2">FDCP Image Uploader</h1>
           <p className="text-slate-500 text-sm">Securely upload media to Amazon S3 and generate public URLs</p>
         </header>
+
+        {/* Title Input */}
+        <div className="mb-6 animate-fade-in">
+          <label className="block text-sm font-bold text-slate-700 mb-2">
+            Content Title (Optional)
+          </label>
+          <input
+            type="text"
+            value={uploadTitle}
+            onChange={(e) => setUploadTitle(e.target.value)}
+            placeholder="e.g. Hello Love Again"
+            className="w-full px-4 py-3 bg-white border border-slate-200 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 rounded-xl text-slate-800 placeholder-slate-400 focus:outline-none transition-all duration-200 shadow-sm"
+          />
+          <p className="text-xs text-slate-500 mt-1.5">
+            This will be used to organize your uploads into folders (e.g. uploads/2026-05/hello-love-again/filename.mp4)
+          </p>
+        </div>
 
         {/* Upload Zone */}
         <div 
