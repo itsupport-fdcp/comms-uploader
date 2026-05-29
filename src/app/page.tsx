@@ -51,6 +51,10 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+
+
+  
+
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);
