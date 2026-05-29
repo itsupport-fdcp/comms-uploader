@@ -192,8 +192,30 @@ export default function App() {
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const [copiedAll, setCopiedAll] = useState<'newline' | 'comma' | null>(null);
 
+  const fallbackCopy = (text: string) => {
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    // Avoid scrolling to bottom
+    textArea.style.top = "0";
+    textArea.style.left = "0";
+    textArea.style.position = "fixed";
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    try {
+      document.execCommand('copy');
+    } catch (err) {
+      console.error('Fallback: Oops, unable to copy', err);
+    }
+    document.body.removeChild(textArea);
+  };
+
   const copyToClipboard = (url: string) => {
-    navigator.clipboard.writeText(url);
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(url);
+    } else {
+      fallbackCopy(url);
+    }
     setCopiedUrl(url);
     setTimeout(() => setCopiedUrl(null), 2000);
   };
@@ -202,7 +224,13 @@ export default function App() {
     if (uploads.length === 0) return;
     const urls = uploads.map(u => u.url);
     const text = format === 'newline' ? urls.join('\n') : urls.join(', ');
-    navigator.clipboard.writeText(text);
+    
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text);
+    } else {
+      fallbackCopy(text);
+    }
+    
     setCopiedAll(format);
     setTimeout(() => setCopiedAll(null), 2000);
   };
