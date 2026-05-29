@@ -157,6 +157,7 @@ export default function App() {
           body: file,
           headers: {
             'Content-Type': file.type || 'application/octet-stream',
+            'Content-Disposition': 'inline',
           },
         });
 
