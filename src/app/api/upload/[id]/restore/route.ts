@@ -3,10 +3,11 @@ import { getDb, saveDb } from '@/lib/db';
 
 export async function POST(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const uploadId = Number(params.id);
+    const { id } = await params;
+    const uploadId = Number(id);
     if (!uploadId) {
       return NextResponse.json(
         { success: false, error: 'Invalid upload ID' },
