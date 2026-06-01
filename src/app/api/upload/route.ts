@@ -7,6 +7,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { getDb, saveDb } from '@/lib/db';
 
 const execPromise = promisify(exec);
 
@@ -61,6 +62,8 @@ export async function POST(request: Request) {
   try {
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
+    const eventId = formData.get('event_id') ? Number(formData.get('event_id')) : null;
+    const uploadedBy = (formData.get('uploaded_by') as string) || 'anonymous';
 
     if (!file) {
       return NextResponse.json(
@@ -225,12 +228,49 @@ export async function POST(request: Request) {
     const presignedUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
     const publicUrl = `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
 
+    // --- SQLite: record upload ---
+    let uploadId: number | null = null;
+    try {
+      const db = await getDb();
+      const originalSize = file.size;
+      const compressedSize = fileContent.length;
+      const fileType = isVideo ? 'video' : 'image';
+      const resolvedEventId = eventId || 1; // fallback to first event
+
+      db.run(
+        `INSERT INTO uploads (event_id, filename, s3_key, url, file_type, original_size, compressed_size, uploaded_by, current_version)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+        [resolvedEventId, sanitizedName, key, publicUrl, fileType, originalSize, compressedSize, uploadedBy]
+      );
+
+      const idResult = db.exec('SELECT last_insert_rowid() AS id');
+      uploadId = idResult[0]?.values[0]?.[0] as number;
+
+      if (uploadId) {
+        db.run(
+          `INSERT INTO upload_versions (upload_id, version_number, filename, s3_key, url, uploaded_by)
+           VALUES (?, 1, ?, ?, ?, ?)`,
+          [uploadId, sanitizedName, key, publicUrl, uploadedBy]
+        );
+
+        db.run(
+          `INSERT INTO upload_actions (upload_id, action, performed_by) VALUES (?, 'UPLOAD', ?)`,
+          [uploadId, uploadedBy]
+        );
+      }
+
+      saveDb(db);
+    } catch (dbErr) {
+      console.error('SQLite write error (non-fatal):', dbErr);
+    }
+
     return NextResponse.json({
       success: true,
       presignedUrl,
       url: publicUrl,
       filename: sanitizedName,
       compressedSize: fileContent.length,
+      uploadId,
     });
   } catch (error: any) {
     console.error('Presign Error:', error);

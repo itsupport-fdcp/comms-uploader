@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
 import { S3Client, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { getDb, saveDb } from '@/lib/db';
 
 export async function POST(request: Request) {
   try {
-    const { url } = await request.json();
+    const { url, upload_id, performed_by } = await request.json();
 
     if (!url) {
       return NextResponse.json(
@@ -29,11 +30,9 @@ export async function POST(request: Request) {
     }
 
     // Extract S3 Key from public URL
-    // e.g. https://fdcp-images.s3.ap-southeast-1.amazonaws.com/uploads/2026-06/1717200000-file.mp4
     let s3Key = '';
     try {
       const urlObj = new URL(url);
-      // Pathname starts with '/' e.g., '/uploads/2026-06/1717200000-file.mp4'
       s3Key = decodeURIComponent(urlObj.pathname.substring(1));
     } catch (e) {
       console.error('Failed to parse URL for S3 key extraction:', e);
@@ -65,6 +64,24 @@ export async function POST(request: Request) {
 
     await s3Client.send(command);
     console.log(`Successfully deleted S3 object: ${s3Key} from bucket ${bucket}`);
+
+    // --- SQLite: log DELETE and remove record ---
+    try {
+      const db = await getDb();
+      const actor = performed_by || 'anonymous';
+
+      if (upload_id) {
+        db.run(
+          `INSERT INTO upload_actions (upload_id, action, performed_by) VALUES (?, 'DELETE', ?)`,
+          [upload_id, actor]
+        );
+        db.run(`DELETE FROM uploads WHERE id = ?`, [upload_id]);
+      }
+
+      saveDb(db);
+    } catch (dbErr) {
+      console.error('SQLite delete error (non-fatal):', dbErr);
+    }
 
     return NextResponse.json({
       success: true,

@@ -26,7 +26,7 @@ import {
   Calendar,
   FileText
 } from 'lucide-react';
-import { auth, db } from '../firebase';
+import { auth } from '../firebase';
 import { 
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
@@ -34,16 +34,6 @@ import {
   onAuthStateChanged
 } from 'firebase/auth';
 import type { User } from 'firebase/auth';
-import {
-  collection,
-  addDoc,
-  doc,
-  deleteDoc,
-  updateDoc,
-  onSnapshot,
-  query,
-  orderBy
-} from 'firebase/firestore';
 
 function compressImageToWebP(file: File): Promise<File> {
   return new Promise((resolve) => {
@@ -192,26 +182,22 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Monitor Firestore real-time history uploads
+  // Load upload history from SQLite API
+  const fetchHistory = async () => {
+    try {
+      const res = await fetch('/api/history');
+      const data = await res.json();
+      if (data.success) {
+        setUploads(data.uploads);
+      }
+    } catch (err) {
+      console.error('Failed to fetch history:', err);
+    }
+  };
+
   useEffect(() => {
     if (!user) return;
-
-    const q = query(
-      collection(db, 'history'),
-      orderBy('uploadedAt', 'desc')
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const historyList = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      setUploads(historyList);
-    }, (error) => {
-      console.error("Firestore history listener error:", error);
-    });
-
-    return () => unsubscribe();
+    fetchHistory();
   }, [user]);
 
   const handleAuthSubmit = async (e: React.FormEvent) => {
@@ -301,6 +287,8 @@ export default function App() {
 
         const formData = new FormData();
         formData.append('file', processedFile);
+        formData.append('event_id', '1'); // TODO: wire to event selector
+        formData.append('uploaded_by', user.email || 'anonymous');
 
         const res = await fetch('/api/upload', {
           method: 'POST',
@@ -310,18 +298,8 @@ export default function App() {
         const data = await res.json();
 
         if (data.success) {
-          setStatusMessage("Saving metadata to history database...");
-          await addDoc(collection(db, 'history'), {
-            originalName: file.name,
-            filename: data.filename,
-            url: data.url,
-            size: file.size,
-            compressedSize: data.compressedSize || file.size,
-            type: isVideo ? 'video' : (isImage ? 'photo' : 'other'),
-            uploadedBy: user.email,
-            uploadedAt: new Date().toISOString(),
-            status: 'uploaded'
-          });
+          setStatusMessage("Refreshing history...");
+          await fetchHistory();
         } else {
           console.error("Upload failed:", data.error);
           setAuthError(`Upload failed: ${data.error}`);
@@ -355,6 +333,8 @@ export default function App() {
 
       const formData = new FormData();
       formData.append('file', processedFile);
+      formData.append('event_id', '1');
+      formData.append('uploaded_by', user.email || 'anonymous');
 
       // Upload replacement file
       const res = await fetch('/api/upload', {
@@ -365,17 +345,7 @@ export default function App() {
       const data = await res.json();
 
       if (data.success) {
-        // Update the existing Firestore history record
-        const docRef = doc(db, 'history', id);
-        await updateDoc(docRef, {
-          originalName: file.name,
-          filename: data.filename,
-          url: data.url,
-          size: file.size,
-          compressedSize: data.compressedSize || file.size,
-          type: isVideo ? 'video' : (isImage ? 'photo' : 'other'),
-          uploadedAt: new Date().toISOString()
-        });
+        await fetchHistory();
       } else {
         setAuthError(`Re-upload failed: ${data.error}`);
         setTimeout(() => setAuthError(null), 5000);
@@ -413,22 +383,26 @@ export default function App() {
     try {
       setDeleteConfirmId(null);
       
-      // 1. Delete from S3 first
+      // 1. Delete from S3 and SQLite
       const s3Res = await fetch('/api/delete', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ url: record.url }),
+        body: JSON.stringify({
+          url: record.url,
+          upload_id: record.id,
+          performed_by: user.email || 'anonymous',
+        }),
       });
       const s3Data = await s3Res.json();
       
       if (!s3Data.success) {
-        console.warn("S3 delete response warning:", s3Data.error);
+        console.warn("Delete response warning:", s3Data.error);
       }
 
-      // 2. Delete from Firestore history tracking
-      await deleteDoc(doc(db, 'history', id));
+      // 2. Refresh history from SQLite
+      await fetchHistory();
       
     } catch (error: any) {
       console.error("Error in delete execution:", error);
