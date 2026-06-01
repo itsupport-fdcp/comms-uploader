@@ -160,6 +160,7 @@ export default function App() {
   const [isUploading, setIsUploading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [uploads, setUploads] = useState<any[]>([]);
+  const [sessionUploads, setSessionUploads] = useState<any[]>([]);
 
   // Advanced Filters State
   const [searchQuery, setSearchQuery] = useState('');
@@ -172,6 +173,14 @@ export default function App() {
   const [selectedUpload, setSelectedUpload] = useState<any | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [reuploadingId, setReuploadingId] = useState<string | null>(null);
+
+  // Events
+  const [events, setEvents] = useState<{ id: number; name: string; year: number }[]>([]);
+  const [selectedEventId, setSelectedEventId] = useState<number | null>(null);
+  const [newEventName, setNewEventName] = useState('');
+  const [newEventYear, setNewEventYear] = useState(new Date().getFullYear().toString());
+  const [showNewEventForm, setShowNewEventForm] = useState(false);
+  const [eventError, setEventError] = useState<string | null>(null);
 
   // Monitor Firebase Auth state changes
   useEffect(() => {
@@ -198,7 +207,44 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
     fetchHistory();
+    fetchEvents();
   }, [user]);
+
+  const fetchEvents = async () => {
+    try {
+      const res = await fetch('/api/events');
+      const data = await res.json();
+      if (data.success && data.events.length) {
+        setEvents(data.events);
+        setSelectedEventId(data.events[0].id);
+      }
+    } catch (err) {
+      console.error('Failed to fetch events:', err);
+    }
+  };
+
+  const handleCreateEvent = async () => {
+    if (!newEventName.trim() || !newEventYear) return;
+    setEventError(null);
+    try {
+      const res = await fetch('/api/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newEventName.trim(), year: Number(newEventYear) }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setEvents((prev) => [data.event, ...prev]);
+        setSelectedEventId(data.event.id);
+        setNewEventName('');
+        setShowNewEventForm(false);
+      } else {
+        setEventError(data.error || 'Failed to create event');
+      }
+    } catch (err: any) {
+      setEventError(err.message || 'Failed to create event');
+    }
+  };
 
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -259,6 +305,7 @@ export default function App() {
       setPassword('');
       setConfirmPassword('');
       setAuthError(null);
+      setSessionUploads([]);
     } catch (err) {
       console.error('Error signing out:', err);
     }
@@ -287,7 +334,7 @@ export default function App() {
 
         const formData = new FormData();
         formData.append('file', processedFile);
-        formData.append('event_id', '1'); // TODO: wire to event selector
+        formData.append('event_id', String(selectedEventId || 1));
         formData.append('uploaded_by', user.email || 'anonymous');
 
         const res = await fetch('/api/upload', {
@@ -300,6 +347,14 @@ export default function App() {
         if (data.success) {
           setStatusMessage("Refreshing history...");
           await fetchHistory();
+          const newUploadItem = {
+            id: data.uploadId || Date.now().toString(),
+            type: processedFile.type.startsWith('video/') ? 'video' : 'photo',
+            url: data.url,
+            originalName: processedFile.name,
+            filename: data.filename,
+          };
+          setSessionUploads((prev) => [newUploadItem, ...prev]);
         } else {
           console.error("Upload failed:", data.error);
           setAuthError(`Upload failed: ${data.error}`);
@@ -314,7 +369,7 @@ export default function App() {
     
     setIsUploading(false);
     setStatusMessage(null);
-  }, [user]);
+  }, [user, selectedEventId]);
 
   // Re-upload in place
   const handleReupload = async (id: string, file: File) => {
@@ -333,7 +388,7 @@ export default function App() {
 
       const formData = new FormData();
       formData.append('file', processedFile);
-      formData.append('event_id', '1');
+      formData.append('event_id', String(selectedEventId || 1));
       formData.append('uploaded_by', user.email || 'anonymous');
 
       // Upload replacement file
@@ -346,6 +401,14 @@ export default function App() {
 
       if (data.success) {
         await fetchHistory();
+        const newUploadItem = {
+          id: data.uploadId || Date.now().toString(),
+          type: processedFile.type.startsWith('video/') ? 'video' : 'photo',
+          url: data.url,
+          originalName: processedFile.name,
+          filename: data.filename,
+        };
+        setSessionUploads((prev) => [newUploadItem, ...prev]);
       } else {
         setAuthError(`Re-upload failed: ${data.error}`);
         setTimeout(() => setAuthError(null), 5000);
@@ -449,6 +512,21 @@ export default function App() {
   const copyAllLinks = (format: 'newline' | 'comma') => {
     if (uploads.length === 0) return;
     const urls = uploads.map(u => u.url);
+    const text = format === 'newline' ? urls.join('\n') : urls.join(', ');
+    
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text);
+    } else {
+      fallbackCopy(text);
+    }
+    
+    setCopiedAll(format);
+    setTimeout(() => setCopiedAll(null), 2000);
+  };
+
+  const copySessionLinks = (format: 'newline' | 'comma') => {
+    if (sessionUploads.length === 0) return;
+    const urls = sessionUploads.map(u => u.url);
     const text = format === 'newline' ? urls.join('\n') : urls.join(', ');
     
     if (navigator.clipboard && window.isSecureContext) {
@@ -767,12 +845,78 @@ export default function App() {
           {/* Tab 1: Upload Console */}
           {dashboardTab === 'upload' && (
             <div className="space-y-6 animate-fade-in">
+
+              {/* Event Selector */}
+              <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                    Upload Destination Event
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => { setShowNewEventForm((v) => !v); setEventError(null); }}
+                    className="text-[10px] font-bold text-brand-600 hover:text-brand-700 flex items-center gap-1 cursor-pointer transition-colors"
+                  >
+                    <span>{showNewEventForm ? '✕ Cancel' : '+ New Event'}</span>
+                  </button>
+                </div>
+
+                {!showNewEventForm ? (
+                  <select
+                    value={selectedEventId ?? ''}
+                    onChange={(e) => setSelectedEventId(Number(e.target.value))}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 rounded-2xl text-sm font-semibold text-slate-700 outline-none transition-all duration-200 cursor-pointer"
+                  >
+                    {events.length === 0 && (
+                      <option value="" disabled>No events yet — create one</option>
+                    )}
+                    {events.map((ev) => (
+                      <option key={ev.id} value={ev.id}>
+                        {ev.name} {ev.year}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="flex gap-3">
+                      <input
+                        type="text"
+                        value={newEventName}
+                        onChange={(e) => setNewEventName(e.target.value)}
+                        placeholder="Event name (e.g. PFIM)"
+                        className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-200 focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 rounded-2xl text-sm font-semibold text-slate-700 placeholder-slate-400 outline-none transition-all duration-200"
+                      />
+                      <input
+                        type="number"
+                        value={newEventYear}
+                        onChange={(e) => setNewEventYear(e.target.value)}
+                        placeholder="Year"
+                        min={2020}
+                        max={2099}
+                        className="w-28 px-4 py-2.5 bg-slate-50 border border-slate-200 focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 rounded-2xl text-sm font-semibold text-slate-700 outline-none transition-all duration-200"
+                      />
+                    </div>
+                    {eventError && (
+                      <p className="text-xs text-red-600 font-semibold">{eventError}</p>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleCreateEvent}
+                      disabled={!newEventName.trim() || !newEventYear}
+                      className="w-full py-2.5 bg-brand-500 hover:bg-brand-600 text-white text-xs font-bold rounded-2xl transition-all shadow-sm shadow-brand-500/15 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                    >
+                      Create &amp; Select Event
+                    </button>
+                  </div>
+                )}
+              </div>
+
               {/* Upload Zone */}
-              <div 
-                {...getRootProps()} 
+              <div
+                {...getRootProps()}
                 className={`border-2 border-dashed rounded-3xl p-16 text-center cursor-pointer transition-all duration-300 ease-in-out shadow-sm ${
-                  isDragActive 
-                    ? 'border-brand-500 bg-brand-50/20 scale-[1.005] shadow-md shadow-brand-500/5' 
+                  isDragActive
+                    ? 'border-brand-500 bg-brand-50/20 scale-[1.005] shadow-md shadow-brand-500/5'
                     : 'border-slate-200 bg-white hover:border-brand-400 hover:bg-slate-50/40 hover:shadow-md'
                 }`}
               >
@@ -816,31 +960,31 @@ export default function App() {
               )}
 
               {/* Micro Quick List of last 3 uploads */}
-              {uploads.length > 0 && (
+              {sessionUploads.length > 0 && (
                 <div className="mt-8 animate-fade-in">
                   <div className="flex items-center justify-between gap-4 mb-4">
-                    <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Last Uploaded</h3>
+                    <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Session Uploads</h3>
                     <div className="flex items-center space-x-2">
                       <button
-                        onClick={() => copyAllLinks('newline')}
+                        onClick={() => copySessionLinks('newline')}
                         className={`flex items-center px-3 py-1.5 rounded-xl text-[10px] font-bold transition-all duration-200 border cursor-pointer ${
                           copiedAll === 'newline'
                             ? 'bg-green-50 border-green-200 text-green-700'
                             : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50 shadow-xs'
                         }`}
-                        title="Copy all uploaded S3 links (one per line) to clipboard"
+                        title="Copy session uploaded S3 links (one per line) to clipboard"
                       >
                         <Copy className="w-3 h-3 mr-1.5" />
                         {copiedAll === 'newline' ? 'Copied Column!' : 'Copy as Column'}
                       </button>
                       <button
-                        onClick={() => copyAllLinks('comma')}
+                        onClick={() => copySessionLinks('comma')}
                         className={`flex items-center px-3 py-1.5 rounded-xl text-[10px] font-bold transition-all duration-200 border cursor-pointer ${
                           copiedAll === 'comma'
                             ? 'bg-green-50 border-green-200 text-green-700'
                             : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50 shadow-xs'
                         }`}
-                        title="Copy all uploaded S3 links as comma-separated values"
+                        title="Copy session uploaded S3 links as comma-separated values"
                       >
                         <Copy className="w-3 h-3 mr-1.5" />
                         {copiedAll === 'comma' ? 'Copied CSV!' : 'Copy as CSV'}
@@ -848,7 +992,7 @@ export default function App() {
                     </div>
                   </div>
                   <div className="grid gap-3">
-                    {uploads.slice(0, 3).map((upload) => (
+                    {sessionUploads.map((upload) => (
                       <div key={upload.id} className="bg-white rounded-2xl p-4 border border-slate-100 flex items-center space-x-4 shadow-sm min-w-0">
                         <div className="h-12 w-12 flex-shrink-0 bg-slate-100 rounded-lg overflow-hidden flex items-center justify-center border border-slate-200/40">
                           {upload.type === 'photo' ? (

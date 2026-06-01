@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { lookup as mimeLookup } from 'mime-types';
 import { promises as fs } from 'fs';
 import path from 'path';
@@ -213,7 +212,26 @@ export async function POST(request: Request) {
     const now = new Date();
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, '0');
-    const folder = `uploads/${year}-${month}/`;
+
+    // Resolve event name for the S3 folder path
+    let eventFolder = 'general';
+    try {
+      const dbInstance = await getDb();
+      const resolvedEventId = eventId || 1;
+      const eventResult = dbInstance.exec(
+        'SELECT name, year FROM events WHERE id = ?',
+        [resolvedEventId]
+      );
+      if (eventResult.length && eventResult[0].values.length) {
+        const [evName, evYear] = eventResult[0].values[0] as [string, number];
+        // Sanitize for use in S3 path: lowercase, spaces to hyphens
+        eventFolder = `${evName}-${evYear}`.toLowerCase().replace(/\s+/g, '-');
+      }
+    } catch (evErr) {
+      console.warn('Could not resolve event name for path:', evErr);
+    }
+
+    const folder = `uploads/${year}-${month}/${eventFolder}/`;
     const key = `${folder}${Date.now()}-${sanitizedName}`;
 
     const command = new PutObjectCommand({
@@ -224,8 +242,10 @@ export async function POST(request: Request) {
       ContentDisposition: 'inline',
     });
 
-    // Generate the presigned URL valid for 1 hour
-    const presignedUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+    // Directly upload the file to S3 from the server
+    await s3Client.send(command);
+    console.log(`Uploaded to S3: ${key} (${fileContent.length} bytes)`);
+
     const publicUrl = `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
 
     // --- SQLite: record upload ---
@@ -266,7 +286,6 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
-      presignedUrl,
       url: publicUrl,
       filename: sanitizedName,
       compressedSize: fileContent.length,

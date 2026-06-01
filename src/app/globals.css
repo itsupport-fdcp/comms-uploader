@@ -68,3 +68,14 @@ body {
   background: var(--background);
   color: var(--foreground);
 }
+
+/* Hide browser-native password reveal buttons (Edge, Chrome) */
+input[type="password"]::-ms-reveal,
+input[type="password"]::-ms-clear {
+  display: none;
+}
+input[type="password"]::-webkit-contacts-auto-fill-button,
+input[type="password"]::-webkit-credentials-auto-fill-button {
+  visibility: hidden;
+  pointer-events: none;
+}
