@@ -1,6 +1,7 @@
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getAnalytics, isSupported } from "firebase/analytics";
+import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "AIzaSyD5jsN2B3ngQTYhFWfXE0JbwnPJz22dF98",
@@ -17,6 +18,9 @@ const app = initializeApp(firebaseConfig);
 
 // Export Auth instance for use throughout the UI.
 export const auth = getAuth(app);
+
+// Export Firestore database instance.
+export const db = getFirestore(app);
 
 // Conditionally initialize analytics since it is environment-dependent (e.g. unsupported in SSR)
 export const analyticsPromise = isSupported()

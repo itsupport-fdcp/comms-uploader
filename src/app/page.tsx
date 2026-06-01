@@ -27,6 +27,105 @@ import {
 } from 'firebase/auth';
 import type { User } from 'firebase/auth';
 
+function compressImageToWebP(file: File): Promise<File> {
+  return new Promise((resolve) => {
+    // Check if the browser supports FileReader
+    if (!window.FileReader) {
+      resolve(file);
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        // Setup canvas
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+        const maxDimension = 2560;
+
+        // Proportional downscaling if image is huge
+        if (width > maxDimension || height > maxDimension) {
+          if (width > height) {
+            height = Math.round((height * maxDimension) / width);
+            width = maxDimension;
+          } else {
+            width = Math.round((width * maxDimension) / height);
+            height = maxDimension;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(file); // Fallback to original file if context is unavailable
+          return;
+        }
+
+        // Draw image onto canvas
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // Adaptive WebP compression targeting under 1 MB
+        let quality = 0.85;
+        const targetSize = 1 * 1024 * 1024; // 1 MB
+
+        const attemptCompression = (q: number) => {
+          canvas.toBlob(
+            (blob) => {
+              if (!blob) {
+                resolve(file); // Fallback
+                return;
+              }
+
+              if (blob.size > targetSize && q > 0.4) {
+                // If it is > 1MB and quality is high enough, try lower quality
+                attemptCompression(q - 0.15);
+              } else if (blob.size > targetSize && q <= 0.4 && canvas.width > 1280) {
+                // If it is still too large, downscale resolution by 25% and retry
+                canvas.width = Math.round(canvas.width * 0.75);
+                canvas.height = Math.round(canvas.height * 0.75);
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                attemptCompression(0.7); // Reset quality loop at new resolution
+              } else {
+                // Succeeded or hit absolute floor, build the new File object
+                const dotIndex = file.name.lastIndexOf('.');
+                const originalNameWithoutExt = dotIndex !== -1 ? file.name.substring(0, dotIndex) : file.name;
+                const newFilename = `${originalNameWithoutExt}.webp`;
+                
+                const compressedFile = new File([blob], newFilename, {
+                  type: 'image/webp',
+                  lastModified: Date.now(),
+                });
+                
+                resolve(compressedFile);
+              }
+            },
+            'image/webp',
+            q
+          );
+        };
+
+        attemptCompression(quality);
+      };
+
+      img.onerror = () => {
+        resolve(file); // Fallback on image error
+      };
+
+      img.src = event.target?.result as string;
+    };
+
+    reader.onerror = () => {
+      resolve(file); // Fallback on reader error
+    };
+
+    reader.readAsDataURL(file);
+  });
+}
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
@@ -40,6 +139,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
 
   const [isUploading, setIsUploading] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [uploads, setUploads] = useState<any[]>([]);
 
   // Monitor Firebase Auth state changes
@@ -128,8 +228,11 @@ export default function App() {
     
     for (const file of acceptedFiles) {
       try {
-        // Step 1: Request a Presigned URL
-        const presignRes = await fetch('/api/upload', {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        // POST to our secure serverless endpoint
+        const res = await fetch('/api/upload', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -142,28 +245,15 @@ export default function App() {
         
         const presignResponse = await presignRes.json();
         
-        if (!presignRes.ok || !presignResponse.success) {
-          console.error("Presign failed:", presignResponse.error);
-          setAuthError(`Upload failed: ${presignResponse.error}`);
-          setTimeout(() => setAuthError(null), 5000);
-          continue;
-        }
-
-        const { presignedUrl, url: publicUrl, filename } = presignResponse;
-
-        // Step 2: Upload directly to S3 using the Presigned URL
-        const uploadRes = await fetch(presignedUrl, {
-          method: 'PUT',
-          body: file,
-          headers: {
-            'Content-Type': file.type || 'application/octet-stream',
-            'Content-Disposition': 'inline',
-          },
-        });
-
-        if (!uploadRes.ok) {
-          console.error("Direct upload failed:", uploadRes.statusText);
-          setAuthError(`Direct upload failed: ${uploadRes.statusText}`);
+        if (response.success) {
+          setUploads(prev => [{
+            url: response.url,
+            filename: response.filename,
+            originalName: file.name
+          }, ...prev]);
+        } else {
+          console.error("Upload failed:", response.error);
+          setAuthError(`Upload failed: ${response.error}`);
           setTimeout(() => setAuthError(null), 5000);
           continue;
         }
@@ -182,6 +272,7 @@ export default function App() {
     }
     
     setIsUploading(false);
+    setStatusMessage(null);
   }, [user]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({ 
@@ -236,85 +327,58 @@ export default function App() {
     setTimeout(() => setCopiedAll(null), 2000);
   };
 
-  // Loading state when checking authentication
+  // Loading state when checking authentication (Cohesive Light Theme)
   if (isAuthLoading) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center space-y-4">
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center space-y-4 animate-fade-in">
         <div className="relative flex items-center justify-center">
-          <div className="h-16 w-16 rounded-full border-4 border-brand-500/20 border-t-brand-500 animate-spin"></div>
-          <ShieldCheck className="h-8 w-8 text-brand-400 absolute animate-pulse" />
+          <div className="h-16 w-16 rounded-full border-4 border-brand-500/10 border-t-brand-500 animate-spin"></div>
+          <ShieldCheck className="h-8 w-8 text-brand-500 absolute animate-pulse" />
         </div>
-        <p className="text-slate-400 font-medium tracking-wide animate-pulse">Securing your workspace...</p>
+        <p className="text-slate-500 font-medium tracking-wide animate-pulse">Securing your workspace...</p>
       </div>
     );
   }
 
-  // Not authenticated screen (Premium Login/Sign Up)
+  // Not authenticated screen (Redesigned Minimalist Light Theme)
   if (!user) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-[#060814] via-[#090b22] to-[#13072c] flex items-center justify-center p-4 relative overflow-hidden">
-        {/* Dynamic, Fluid Background Blobs matching reference colors */}
-        {/* Blob 1: Neon Cyan/Teal (Top Right) */}
-        <div className="absolute -top-12 -right-12 w-[450px] h-[450px] rounded-full bg-gradient-to-tr from-cyan-500/25 to-teal-400/20 blur-[110px] pointer-events-none animate-pulse-slow" />
-        
-        {/* Blob 2: Vibrant Violet/Fuchsia (Left Center) */}
-        <div className="absolute top-[20%] -left-20 w-[400px] h-[400px] rounded-full bg-gradient-to-br from-fuchsia-600/20 to-purple-600/25 blur-[120px] pointer-events-none animate-float-1" />
-        
-        {/* Blob 3: Deep Royal Blue/Purple (Bottom Right) */}
-        <div className="absolute -bottom-24 right-4 w-[500px] h-[500px] rounded-full bg-gradient-to-tr from-blue-600/20 via-indigo-600/20 to-purple-500/25 blur-[130px] pointer-events-none animate-float-2" />
-        
-        {/* Blob 4: Neon Pink/Purple (Bottom Left) */}
-        <div className="absolute -bottom-16 -left-16 w-80 h-80 rounded-full bg-gradient-to-br from-pink-500/15 to-indigo-500/20 blur-[90px] pointer-events-none animate-pulse-slow" />
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 relative overflow-hidden">
+        {/* Modern, Subtle Light Blurs */}
+        <div className="absolute -top-[10%] -right-[10%] w-[500px] h-[500px] rounded-full bg-brand-100/30 blur-[120px] pointer-events-none animate-pulse-slow" />
+        <div className="absolute -bottom-[10%] -left-[10%] w-[500px] h-[500px] rounded-full bg-indigo-50/40 blur-[120px] pointer-events-none animate-float-1" />
 
-        {/* Decorative Floating Glass Shapes (recreating the user's reference image) */}
-        {/* Shape 1: Top Left Glass Leaf */}
-        <div className="absolute top-[10%] left-[8%] w-48 h-48 rounded-br-[70px] rounded-tl-[70px] bg-white/[0.02] backdrop-blur-md border border-white/[0.08] shadow-2xl rotate-[15deg] pointer-events-none animate-float-1" />
-        
-        {/* Shape 2: Center Right Large Glass Triangle/Leaf */}
-        <div className="absolute top-[25%] -right-16 w-80 h-80 rounded-bl-[120px] rounded-tr-[120px] bg-white/[0.015] backdrop-blur-[12px] border border-white/[0.06] shadow-2xl rotate-[-25deg] pointer-events-none animate-float-2" />
-        
-        {/* Shape 3: Bottom Left Glass Sphere */}
-        <div className="absolute bottom-[8%] left-[6%] w-56 h-56 rounded-full bg-gradient-to-br from-white/[0.04] to-transparent backdrop-blur-lg border border-white/[0.12] shadow-2xl pointer-events-none animate-float-3" />
-        
-        {/* Shape 4: Bottom Right Glass Triangle/Leaf */}
-        <div className="absolute bottom-[10%] right-[8%] w-64 h-64 rounded-br-[100px] rounded-tl-[100px] bg-white/[0.02] backdrop-blur-md border border-white/[0.08] shadow-2xl rotate-[38deg] pointer-events-none animate-float-1" />
-
-        {/* Glassmorphic Login Card */}
-        <div className="w-full max-w-md bg-white/[0.03] backdrop-blur-2xl border border-white/[0.08] shadow-[0_32px_64px_rgba(0,0,0,0.5),inset_0_1px_2px_rgba(255,255,255,0.12)] rounded-[32px] p-8 md:p-10 relative z-10 transition-all duration-500 hover:border-white/[0.14] hover:shadow-[0_32px_80px_rgba(0,0,0,0.65)] group/card">
-          
-          {/* Subtle light glare reflect effect on hover */}
-          <div className="absolute inset-0 rounded-[32px] bg-gradient-to-tr from-transparent via-white/[0.02] to-white/[0.05] pointer-events-none opacity-0 group-hover/card:opacity-100 transition-opacity duration-700" />
+        {/* Minimalist Login Card */}
+        <div className="w-full max-w-md bg-white border border-slate-100 shadow-[0_20px_50px_rgba(15,23,42,0.06)] rounded-[32px] p-8 md:p-10 relative z-10 transition-all duration-300 hover:shadow-[0_20px_60px_rgba(15,23,42,0.09)] group/card animate-slide-in">
           
           {/* Brand/Header */}
           <div className="text-center mb-8 relative">
-            <div className="relative inline-flex items-center justify-center mb-5 group">
-              {/* Outer pulsing neon glow */}
-              <div className="absolute inset-0 rounded-2xl bg-gradient-to-tr from-cyan-500 to-fuchsia-600 blur-lg opacity-40 group-hover:opacity-75 transition-opacity duration-300 animate-pulse" />
-              {/* Main glass icon box */}
-              <div className="relative p-4 rounded-2xl bg-white/[0.06] backdrop-blur-md border border-white/20 shadow-lg flex items-center justify-center transform group-hover:scale-105 transition-transform duration-300">
-                <UploadCloud className="h-8 w-8 text-cyan-400" />
+            <div className="inline-flex items-center justify-center mb-5 group">
+              {/* Soft glow for brand */}
+              <div className="relative p-3.5 rounded-2xl bg-gradient-to-tr from-brand-500 to-brand-600 shadow-md shadow-brand-500/15 flex items-center justify-center transform group-hover:scale-105 transition-transform duration-300">
+                <UploadCloud className="h-7 w-7 text-white" />
               </div>
             </div>
-            <h1 className="text-3xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-white via-slate-100 to-slate-300">
-              FDCP S3 Uploader
+            <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">
+              FDCP Comms Uploader
             </h1>
-            <p className="text-slate-400 text-sm mt-2.5 font-light tracking-wide">
+            <p className="text-slate-500 text-sm mt-2 font-light tracking-wide">
               Securely authenticate to access the uploader system
             </p>
           </div>
 
-          {/* Premium Glass Switch Tab */}
-          <div className="flex p-1.5 bg-black/40 rounded-2xl border border-white/5 mb-8 relative">
+          {/* Minimalist Switch Tab */}
+          <div className="flex p-1 bg-slate-100/80 rounded-2xl border border-slate-200/30 mb-8">
             <button
               onClick={() => {
                 setAuthMode('signin');
                 setAuthError(null);
                 setAuthSuccess(null);
               }}
-              className={`flex-1 py-3 text-sm font-semibold rounded-xl transition-all duration-300 ${
+              className={`flex-1 py-2.5 text-xs font-bold rounded-xl transition-all duration-200 cursor-pointer ${
                 authMode === 'signin'
-                  ? 'bg-white/[0.08] backdrop-blur-md border border-white/[0.1] text-white shadow-[0_2px_12px_rgba(255,255,255,0.05)]'
-                  : 'text-slate-400 hover:text-slate-200 cursor-pointer'
+                  ? 'bg-white text-slate-800 shadow-[0_2px_8px_rgba(15,23,42,0.04)] border border-slate-200/50'
+                  : 'text-slate-500 hover:text-slate-700'
               }`}
             >
               Sign In
@@ -325,10 +389,10 @@ export default function App() {
                 setAuthError(null);
                 setAuthSuccess(null);
               }}
-              className={`flex-1 py-3 text-sm font-semibold rounded-xl transition-all duration-300 ${
+              className={`flex-1 py-2.5 text-xs font-bold rounded-xl transition-all duration-200 cursor-pointer ${
                 authMode === 'signup'
-                  ? 'bg-white/[0.08] backdrop-blur-md border border-white/[0.1] text-white shadow-[0_2px_12px_rgba(255,255,255,0.05)]'
-                  : 'text-slate-400 hover:text-slate-200 cursor-pointer'
+                  ? 'bg-white text-slate-800 shadow-[0_2px_8px_rgba(15,23,42,0.04)] border border-slate-200/50'
+                  : 'text-slate-500 hover:text-slate-700'
               }`}
             >
               Register
@@ -337,75 +401,75 @@ export default function App() {
 
           {/* Alert Messages */}
           {authError && (
-            <div className="flex items-center space-x-3 p-4 bg-red-500/10 border border-red-500/20 text-red-200 text-xs rounded-2xl mb-6 backdrop-blur-md animate-shake">
-              <AlertCircle className="h-4.5 w-4.5 text-red-400 flex-shrink-0" />
-              <span className="font-medium tracking-wide">{authError}</span>
+            <div className="flex items-center space-x-3 p-4 bg-red-50 border border-red-100 text-red-700 text-xs rounded-2xl mb-6 animate-shake">
+              <AlertCircle className="h-4.5 w-4.5 text-red-500 flex-shrink-0" />
+              <span className="font-semibold tracking-wide">{authError}</span>
             </div>
           )}
 
           {authSuccess && (
-            <div className="flex items-center space-x-3 p-4 bg-green-500/10 border border-green-500/20 text-green-200 text-xs rounded-2xl mb-6 backdrop-blur-md animate-fade-in">
-              <CheckCircle className="h-4.5 w-4.5 text-green-400 flex-shrink-0" />
-              <span className="font-medium tracking-wide">{authSuccess}</span>
+            <div className="flex items-center space-x-3 p-4 bg-green-50 border border-green-100 text-green-700 text-xs rounded-2xl mb-6 animate-fade-in">
+              <CheckCircle className="h-4.5 w-4.5 text-green-500 flex-shrink-0" />
+              <span className="font-semibold tracking-wide">{authSuccess}</span>
             </div>
           )}
 
           {/* Form */}
           <form onSubmit={handleAuthSubmit} className="space-y-5">
             <div>
-              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2.5 ml-1">
+              <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2.5 ml-1">
                 Email Address
               </label>
               <div className="relative group">
-                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-500 group-focus-within:text-cyan-400 transition-colors duration-300" />
+                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 group-focus-within:text-brand-500 transition-colors duration-200" />
                 <input
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="name@company.com"
-                  className="w-full pl-12 pr-4 py-3.5 bg-black/25 focus:bg-black/40 border border-white/[0.08] focus:border-cyan-400 focus:ring-4 focus:ring-cyan-500/10 rounded-2xl text-white placeholder-slate-500 focus:outline-none transition-all duration-300 backdrop-blur-md text-[15px]"
+                  className="w-full pl-12 pr-4 py-3.5 bg-slate-50/50 hover:bg-slate-50 focus:bg-white border border-slate-200/80 focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 rounded-2xl text-slate-800 placeholder-slate-400 focus:outline-none transition-all duration-200 text-sm"
                   required
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2.5 ml-1">
+              <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2.5 ml-1">
                 Password
               </label>
               <div className="relative group">
-                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-500 group-focus-within:text-cyan-400 transition-colors duration-300" />
+                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 group-focus-within:text-brand-500 transition-colors duration-200" />
                 <input
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full pl-12 pr-12 py-3.5 bg-black/25 focus:bg-black/40 border border-white/[0.08] focus:border-cyan-400 focus:ring-4 focus:ring-cyan-500/10 rounded-2xl text-white placeholder-slate-500 focus:outline-none transition-all duration-300 backdrop-blur-md text-[15px]"
+                  className="w-full pl-12 pr-12 py-3.5 bg-slate-50/50 hover:bg-slate-50 focus:bg-white border border-slate-200/80 focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 rounded-2xl text-slate-800 placeholder-slate-400 focus:outline-none transition-all duration-200 text-sm"
                   required
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 focus:outline-none cursor-pointer transition-colors duration-200"
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none cursor-pointer transition-colors duration-200 animate-fade-in"
                 >
-                  {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  {showPassword ? <EyeOff className="h-4.5 w-4.5" /> : <Eye className="h-4.5 w-4.5" />}
                 </button>
               </div>
             </div>
 
             {authMode === 'signup' && (
               <div className="animate-fade-in">
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2.5 ml-1">
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2.5 ml-1">
                   Confirm Password
                 </label>
                 <div className="relative group">
-                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-500 group-focus-within:text-cyan-400 transition-colors duration-300" />
+                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 group-focus-within:text-brand-500 transition-colors duration-200" />
                   <input
                     type={showPassword ? 'text' : 'password'}
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     placeholder="••••••••"
-                    className="w-full pl-12 pr-12 py-3.5 bg-black/25 focus:bg-black/40 border border-white/[0.08] focus:border-cyan-400 focus:ring-4 focus:ring-cyan-500/10 rounded-2xl text-white placeholder-slate-500 focus:outline-none transition-all duration-300 backdrop-blur-md text-[15px]"
+                    className="w-full pl-12 pr-12 py-3.5 bg-slate-50/50 hover:bg-slate-50 focus:bg-white border border-slate-200/80 focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 rounded-2xl text-slate-800 placeholder-slate-400 focus:outline-none transition-all duration-200 text-sm"
                     required
                   />
                 </div>
@@ -415,7 +479,7 @@ export default function App() {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full py-4 mt-6 bg-gradient-to-r from-cyan-500 via-blue-500 to-purple-600 hover:from-cyan-400 hover:via-blue-400 hover:to-purple-500 text-white font-bold tracking-wide rounded-2xl shadow-[0_12px_30px_rgba(6,182,212,0.25)] hover:shadow-[0_12px_35px_rgba(6,182,212,0.45)] hover:scale-[1.01] active:scale-[0.99] transition-all duration-300 flex items-center justify-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              className="w-full py-4 mt-6 bg-gradient-to-r from-brand-500 to-brand-600 hover:from-brand-600 hover:to-brand-700 text-white font-bold tracking-wide rounded-2xl shadow-lg shadow-brand-500/15 hover:shadow-xl hover:shadow-brand-500/25 hover:scale-[1.01] active:scale-[0.99] transition-all duration-200 flex items-center justify-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             >
               {isLoading ? (
                 <Loader2 className="h-5 w-5 animate-spin text-white" />
@@ -479,11 +543,11 @@ export default function App() {
             )}
             
             <div className="space-y-1">
-              <p className="text-lg font-medium text-slate-700">
-                {isDragActive ? 'Drop files here...' : 'Drag & drop images here'}
+              <p className="text-lg font-medium text-slate-700 animate-fade-in">
+                {isUploading ? (statusMessage || 'Uploading...') : (isDragActive ? 'Drop files here...' : 'Drag & drop photos or videos here')}
               </p>
               <p className="text-sm text-slate-500">
-                or click to select files from your computer
+                {isUploading ? 'Please wait, optimizing and uploading...' : 'or click to select files from your computer'}
               </p>
             </div>
           </div>
@@ -543,7 +607,7 @@ export default function App() {
             
             <div className="grid gap-4">
               {uploads.map((upload, index) => (
-                <div key={index} className="bg-white rounded-xl p-4 shadow-sm border border-slate-100 flex items-center space-x-4 transition-all hover:shadow-md animate-slide-in">
+                <div key={index} className="bg-white rounded-xl p-4 shadow-sm border border-slate-100 flex items-center space-x-4 transition-all hover:shadow-md animate-slide-in min-w-0">
                   <div className="h-16 w-16 flex-shrink-0 bg-slate-100 rounded-lg overflow-hidden flex items-center justify-center">
                     {upload.url.match(/\.(jpeg|jpg|gif|png|webp)$/i) ? (
                       <img src={upload.url} alt={upload.filename} className="w-full h-full object-cover" />
@@ -556,10 +620,10 @@ export default function App() {
                     <p className="text-sm font-medium text-slate-900 truncate">{upload.originalName}</p>
                     <p className="text-xs text-slate-500 truncate mb-2">{upload.filename}</p>
                     
-                    <div className="flex items-center space-x-2">
-                      <div className="flex-1 flex items-center px-3 py-1.5 bg-slate-50 rounded-lg border border-slate-200">
+                    <div className="flex items-center space-x-2 w-full min-w-0">
+                      <div className="flex-1 flex items-center px-3 py-1.5 bg-slate-50 rounded-lg border border-slate-200 min-w-0">
                         <LinkIcon className="w-3.5 h-3.5 text-slate-400 mr-2 flex-shrink-0" />
-                        <span className="text-xs text-slate-600 truncate">{upload.url}</span>
+                        <span className="text-xs text-slate-600 truncate block">{upload.url}</span>
                       </div>
                       <button 
                         onClick={() => copyToClipboard(upload.url)}
