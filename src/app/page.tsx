@@ -756,7 +756,7 @@ export default function App() {
             </div>
             <div className="min-w-0">
               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none">Uploader</p>
-              <p className="text-xs font-bold text-slate-700 truncate mt-1.5 leading-none" title={user.email}>
+              <p className="text-xs font-bold text-slate-700 truncate mt-1.5 leading-none" title={user.email || undefined}>
                 {user.email?.split('@')[0]}
               </p>
             </div>
