@@ -59,11 +59,12 @@ function sanitizeFilename(filename: string): string {
 
 export async function POST(request: Request) {
   try {
-    const { filename, contentType: providedContentType } = await request.json();
+    const formData = await request.formData();
+    const file = formData.get('file') as File | null;
 
-    if (!filename) {
+    if (!file) {
       return NextResponse.json(
-        { success: false, error: 'No filename provided' },
+        { success: false, error: 'No file uploaded' },
         { status: 400 }
       );
     }
@@ -229,6 +230,7 @@ export async function POST(request: Request) {
       presignedUrl,
       url: publicUrl,
       filename: sanitizedName,
+      compressedSize: fileContent.length,
     });
   } catch (error: any) {
     console.error('Presign Error:', error);
