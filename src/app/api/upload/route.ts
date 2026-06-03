@@ -17,6 +17,7 @@ interface VideoInfo {
   width?: number;
   height?: number;
   format?: string;
+  hasAudio?: boolean;
 }
 
 async function getVideoInfo(filePath: string): Promise<VideoInfo> {
@@ -36,6 +37,9 @@ async function getVideoInfo(filePath: string): Promise<VideoInfo> {
     const width = videoStream?.width;
     const height = videoStream?.height;
 
+    // Check if an audio stream exists
+    const hasAudio = data.streams?.some((s: any) => s.codec_type === 'audio') ?? false;
+
     return {
       duration,
       size,
@@ -43,11 +47,23 @@ async function getVideoInfo(filePath: string): Promise<VideoInfo> {
       width,
       height,
       format: format.format_name,
+      hasAudio,
     };
   } catch (error) {
     console.error('Error running ffprobe:', error);
     throw error;
   }
+}
+
+async function getFilesRecursively(dir: string): Promise<string[]> {
+  const dirents = await fs.readdir(dir, { withFileTypes: true });
+  const files = await Promise.all(
+    dirents.map((dirent) => {
+      const res = path.resolve(dir, dirent.name);
+      return dirent.isDirectory() ? getFilesRecursively(res) : res;
+    })
+  );
+  return Array.prototype.concat(...files);
 }
 
 function sanitizeFilename(filename: string): string {
@@ -99,12 +115,16 @@ export async function POST(request: Request) {
     const contentType = file.type || mimeLookup(file.name) || 'application/octet-stream';
     const isVideo = contentType.startsWith('video/');
 
-    let fileContent: Buffer;
+    let fileContent: Buffer | null = null;
     let sanitizedName = sanitizeFilename(file.name);
     let finalContentType = contentType;
 
+    let isHls = false;
+    let hlsTotalSize = 0;
+    let hlsTempDir = '';
+
     if (isVideo) {
-      console.log(`Received video for processing: ${file.name} (${file.size} bytes)`);
+      console.log(`Received video for HLS processing: ${file.name} (${file.size} bytes)`);
       
       const arrayBuffer = await file.arrayBuffer();
       const inputBuffer = Buffer.from(arrayBuffer);
@@ -114,7 +134,11 @@ export async function POST(request: Request) {
       
       const ext = path.extname(file.name).replace('.', '') || 'mp4';
       const tempInputPath = path.join(tempDir, `input_${Date.now()}_${crypto.randomUUID()}.${ext}`);
-      const tempOutputPath = path.join(tempDir, `output_${Date.now()}_${crypto.randomUUID()}.mp4`);
+      
+      // Dedicated directory for HLS segments
+      const hlsFolderName = `hls_${Date.now()}_${crypto.randomUUID()}`;
+      hlsTempDir = path.join(tempDir, hlsFolderName);
+      await fs.mkdir(hlsTempDir, { recursive: true });
       
       try {
         // Write file buffer to temp file
@@ -126,80 +150,120 @@ export async function POST(request: Request) {
         
         console.log(`Video duration: ${duration}s, size: ${info.size} bytes, format: ${info.format}`);
         
-        // Calculate target size (2 MB to 8 MB based on duration)
-        // D <= 10s: 2MB. D >= 60s: 8MB. 10s < D < 60s: linear scale.
-        let targetSizeMb = 2;
-        if (duration > 10) {
-          if (duration >= 60) {
-            targetSizeMb = 8;
-          } else {
-            targetSizeMb = 2 + ((duration - 10) / 50) * 6;
-          }
-        }
-        
-        const targetSizeBytes = targetSizeMb * 1024 * 1024;
-        const isStandardWebFormat = ext.toLowerCase() === 'mp4' || ext.toLowerCase() === 'm4v';
-        
-        if (info.size <= targetSizeBytes && isStandardWebFormat) {
-          console.log(`Skipping compression: original file (${info.size} bytes) is already under target (${targetSizeBytes} bytes) and in MP4 format.`);
-          fileContent = inputBuffer;
-        } else if (duration <= 0) {
+        // Ensure input height and width are rounded to even numbers for libx264 compliance
+        const inputHeight = info.height ? Math.floor(info.height / 2) * 2 : 720;
+        const inputWidth = info.width ? Math.floor(info.width / 2) * 2 : 1280;
+        const hasAudio = info.hasAudio ?? false;
+
+        if (duration <= 0) {
           console.log('Skipping compression: invalid duration.');
           fileContent = inputBuffer;
         } else {
-          // Calculate bitrate (bps)
+          // Standard resolution profiles
+          interface ResolutionProfile {
+            name: string;
+            width: number;
+            height: number;
+            bitrateKbps: number;
+          }
+
+          const PROFILES: ResolutionProfile[] = [
+            { name: '1080p', width: 1920, height: 1080, bitrateKbps: 3000 },
+            { name: '720p', width: 1280, height: 720, bitrateKbps: 1500 },
+            { name: '480p', width: 854, height: 480, bitrateKbps: 800 },
+            { name: '360p', width: 640, height: 360, bitrateKbps: 400 },
+            { name: '240p', width: 426, height: 240, bitrateKbps: 200 },
+          ];
+
+          // 1. Get all standard profiles strictly lower than the input height
+          const lowerProfiles = PROFILES.filter(p => p.height < inputHeight);
+
+          // 2. Determine bitrate for the original video based on duration / target size
+          let targetSizeMb = 2;
+          if (duration > 10) {
+            if (duration >= 60) {
+              targetSizeMb = 8;
+            } else {
+              targetSizeMb = 2 + ((duration - 10) / 50) * 6;
+            }
+          }
+          const targetSizeBytes = targetSizeMb * 1024 * 1024;
           const targetTotalBitrate = (targetSizeBytes * 8) / duration;
           const audioBitrate = 128 * 1000;
           let targetVideoBitrate = targetTotalBitrate - audioBitrate;
-          
+
           // Apply bounds (400 kbps to 4000 kbps)
           const videoBitrateFloor = 400 * 1000;
           const videoBitrateCeiling = 4000 * 1000;
-          
+
           if (targetVideoBitrate < videoBitrateFloor) {
             targetVideoBitrate = videoBitrateFloor;
           } else if (targetVideoBitrate > videoBitrateCeiling) {
             targetVideoBitrate = videoBitrateCeiling;
           }
-          
-          const videoBitrateKbps = Math.round(targetVideoBitrate / 1000);
-          console.log(`Targeting video bitrate: ${videoBitrateKbps} kbps`);
-          
-          // Adaptive resolution scaling to maintain pixel density at lower bitrates
-          let targetWidth = 1920;
-          if (videoBitrateKbps < 800) {
-            targetWidth = 854; // 480p
-            console.log('Low bitrate: scaling to 480p');
-          } else if (videoBitrateKbps < 1500) {
-            targetWidth = 1280; // 720p
-            console.log('Medium bitrate: scaling to 720p');
-          } else {
-            console.log('High bitrate: keeping resolution at 1080p');
+
+          const originalBitrateKbps = Math.round(targetVideoBitrate / 1000);
+
+          // 3. Create the original profile
+          const originalProfile: ResolutionProfile = {
+            name: `${inputHeight}p`,
+            width: inputWidth,
+            height: inputHeight,
+            bitrateKbps: originalBitrateKbps
+          };
+
+          // 4. Combine them: original profile + all lower profiles
+          const activeProfiles = [originalProfile, ...lowerProfiles];
+          console.log(`Active resolution profiles to encode: ${activeProfiles.map(p => p.name).join(', ')}`);
+
+          // 5. Transcode each profile sequentially
+          for (const profile of activeProfiles) {
+            const profileDir = path.join(hlsTempDir, profile.name);
+            await fs.mkdir(profileDir, { recursive: true });
+
+            const ffmpegTempInputPath = tempInputPath.replace(/\\/g, '/');
+            const ffmpegSegmentPath = path.join(profileDir, 'seg_%03d.ts').replace(/\\/g, '/');
+            const ffmpegPlaylistPath = path.join(profileDir, 'playlist.m3u8').replace(/\\/g, '/');
+
+            const videoFilter = `scale=-2:${profile.height},format=yuv420p`;
+            const audioParams = hasAudio ? `-c:a aac -b:a 128k` : `-an`;
+
+            const ffmpegCommand = `ffmpeg -y -i "${ffmpegTempInputPath}" -c:v libx264 -preset fast -b:v ${profile.bitrateKbps}k -maxrate ${Math.round(profile.bitrateKbps * 1.5)}k -bufsize ${profile.bitrateKbps * 2}k -vf "${videoFilter}" ${audioParams} -hls_time 6 -hls_playlist_type vod -hls_segment_filename "${ffmpegSegmentPath}" "${ffmpegPlaylistPath}"`;
+
+            console.log(`[HLS] Encoding ${profile.name} (bitrate: ${profile.bitrateKbps}k)...`);
+            const startTime = Date.now();
+            await execPromise(ffmpegCommand);
+            const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+            console.log(`[HLS] Completed encoding ${profile.name} in ${elapsed}s.`);
           }
-          
-          const videoFilter = `scale='min(${targetWidth},iw)':-2,format=yuv420p`;
-          const ffmpegCommand = `ffmpeg -y -i "${tempInputPath}" -c:v libx264 -preset fast -b:v ${videoBitrateKbps}k -maxrate ${Math.round(videoBitrateKbps * 1.5)}k -bufsize ${videoBitrateKbps * 2}k -vf "${videoFilter}" -c:a aac -b:a 128k -movflags +faststart "${tempOutputPath}"`;
-          
-          console.log(`Compressing video... command: ${ffmpegCommand}`);
-          const startTime = Date.now();
-          await execPromise(ffmpegCommand);
-          const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-          
-          fileContent = await fs.readFile(tempOutputPath);
-          console.log(`Video compressed successfully in ${elapsed}s. Size reduced from ${info.size} to ${fileContent.length} bytes.`);
-          
+
+          // 6. Generate the master playlist (playlist.m3u8) in the root hlsTempDir
+          let masterPlaylistContent = '#EXTM3U\n#EXT-X-VERSION:3\n';
+          for (const profile of activeProfiles) {
+            const aspectWidth = Math.round((inputWidth * profile.height) / inputHeight);
+            const profileWidth = Math.round(aspectWidth / 2) * 2;
+            const bandwidth = (profile.bitrateKbps * 1000) + (hasAudio ? 128000 : 0);
+
+            masterPlaylistContent += `#EXT-X-STREAM-INF:BANDWIDTH=${bandwidth},RESOLUTION=${profileWidth}x${profile.height},NAME="${profile.name}"\n`;
+            masterPlaylistContent += `${profile.name}/playlist.m3u8\n`;
+          }
+
+          await fs.writeFile(path.join(hlsTempDir, 'playlist.m3u8'), masterPlaylistContent, 'utf-8');
+          console.log('[HLS] Generated master playlist.');
+
+          isHls = true;
           const originalNameWithoutExt = file.name.substring(0, file.name.lastIndexOf('.')) || file.name;
           sanitizedName = sanitizeFilename(`${originalNameWithoutExt}.mp4`);
-          finalContentType = 'video/mp4';
+          finalContentType = 'application/x-mpegURL';
         }
       } catch (err) {
-        console.error('Error during video compression, falling back to original video upload:', err);
+        console.error('Error during video HLS compression, falling back to original video upload:', err);
         fileContent = inputBuffer;
+        isHls = false;
       } finally {
-        // Clean up temp files
+        // Clean up temp input file
         try {
           await fs.unlink(tempInputPath).catch(() => {});
-          await fs.unlink(tempOutputPath).catch(() => {});
         } catch (cleanupErr) {
           console.error('Cleanup failed:', cleanupErr);
         }
@@ -232,28 +296,72 @@ export async function POST(request: Request) {
     }
 
     const folder = `uploads/${year}-${month}/${eventFolder}/`;
-    const key = `${folder}${Date.now()}-${sanitizedName}`;
+    
+    let key = '';
+    let publicUrl = '';
+    let compressedSize = 0;
 
-    const command = new PutObjectCommand({
-      Bucket: bucket,
-      Key: key,
-      Body: fileContent,
-      ContentType: finalContentType,
-      ContentDisposition: 'inline',
-    });
+    if (isHls && hlsTempDir) {
+      // HLS Directory upload: multiple segments and playlist
+      const uniqueFolder = `${Date.now()}-${sanitizedName.replace(/\.[^/.]+$/, '')}`;
+      const hlsS3Prefix = `${folder}${uniqueFolder}/`;
+      
+      const allFiles = await getFilesRecursively(hlsTempDir);
+      key = `${hlsS3Prefix}playlist.m3u8`;
+      publicUrl = `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
 
-    // Directly upload the file to S3 from the server
-    await s3Client.send(command);
-    console.log(`Uploaded to S3: ${key} (${fileContent.length} bytes)`);
+      console.log(`Uploading HLS files to prefix: ${hlsS3Prefix}`);
+      for (const absolutePath of allFiles) {
+        const relativePath = path.relative(hlsTempDir, absolutePath);
+        const s3RelativePath = relativePath.replace(/\\/g, '/');
 
-    const publicUrl = `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
+        const fileBuf = await fs.readFile(absolutePath);
+        hlsTotalSize += fileBuf.length;
+
+        const fileS3Key = `${hlsS3Prefix}${s3RelativePath}`;
+        const fileContentType = s3RelativePath.endsWith('.m3u8') ? 'application/x-mpegURL' : 'video/MP2T';
+
+        await s3Client.send(new PutObjectCommand({
+          Bucket: bucket,
+          Key: fileS3Key,
+          Body: fileBuf,
+          ContentType: fileContentType,
+          ContentDisposition: 'inline',
+        }));
+      }
+
+      console.log(`HLS upload completed. Total size: ${hlsTotalSize} bytes.`);
+      compressedSize = hlsTotalSize;
+
+      // Clean up local HLS temp files
+      try {
+        await fs.rm(hlsTempDir, { recursive: true, force: true });
+      } catch (cleanupErr) {
+        console.error('Failed to remove local HLS temp folder:', cleanupErr);
+      }
+    } else {
+      // Standard single file upload (photos or fallback video)
+      key = `${folder}${Date.now()}-${sanitizedName}`;
+      publicUrl = `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
+      compressedSize = fileContent!.length;
+
+      const command = new PutObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        Body: fileContent!,
+        ContentType: finalContentType,
+        ContentDisposition: 'inline',
+      });
+
+      await s3Client.send(command);
+      console.log(`Uploaded single file to S3: ${key} (${fileContent!.length} bytes)`);
+    }
 
     // --- SQLite: record upload ---
     let uploadId: number | null = null;
     try {
       const db = await getDb();
       const originalSize = file.size;
-      const compressedSize = fileContent.length;
       const fileType = isVideo ? 'video' : 'image';
       const resolvedEventId = eventId || 1; // fallback to first event
 
@@ -288,7 +396,7 @@ export async function POST(request: Request) {
       success: true,
       url: publicUrl,
       filename: sanitizedName,
-      compressedSize: fileContent.length,
+      compressedSize,
       uploadId,
     });
   } catch (error: any) {

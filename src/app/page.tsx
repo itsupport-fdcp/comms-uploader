@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { 
   UploadCloud, 
@@ -34,6 +34,55 @@ import {
   onAuthStateChanged
 } from 'firebase/auth';
 import type { User } from 'firebase/auth';
+import Hls from 'hls.js';
+
+interface HlsVideoPlayerProps {
+  src: string;
+}
+
+function HlsVideoPlayer({ src }: HlsVideoPlayerProps) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const isHls = src.toLowerCase().includes('.m3u8');
+    let hls: Hls | null = null;
+
+    if (isHls) {
+      if (Hls.isSupported()) {
+        hls = new Hls({
+          maxMaxBufferLength: 10,
+        });
+        hls.loadSource(src);
+        hls.attachMedia(video);
+      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        // Native Safari playback
+        video.src = src;
+      }
+    } else {
+      // Standard video fallback (MP4/etc)
+      video.src = src;
+    }
+
+    return () => {
+      if (hls) {
+        hls.destroy();
+      }
+    };
+  }, [src]);
+
+  return (
+    <video
+      ref={videoRef}
+      controls
+      className="w-full h-full object-contain bg-slate-950 focus:outline-none"
+      preload="metadata"
+      playsInline
+    />
+  );
+}
 
 function compressImageToWebP(file: File): Promise<File> {
   return new Promise((resolve) => {
@@ -1345,14 +1394,11 @@ export default function App() {
 
             <div className="space-y-6">
               {/* Media Preview Box */}
-              <div className="aspect-video bg-slate-50 rounded-2xl overflow-hidden flex items-center justify-center border border-slate-200/50">
+              <div className="aspect-video bg-slate-950 rounded-2xl overflow-hidden flex items-center justify-center border border-slate-200/50">
                 {selectedUpload.type === 'photo' ? (
                   <img src={selectedUpload.url} alt={selectedUpload.originalName} className="w-full h-full object-contain" />
                 ) : (
-                  <div className="flex flex-col items-center justify-center space-y-2">
-                    <FileVideo className="w-10 h-10 text-slate-400 animate-bounce-slow" />
-                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Video Stream Container</span>
-                  </div>
+                  <HlsVideoPlayer src={selectedUpload.url} />
                 )}
               </div>
 

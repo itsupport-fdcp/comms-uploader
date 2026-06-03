@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { S3Client, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, DeleteObjectCommand, ListObjectsV2Command, DeleteObjectsCommand } from '@aws-sdk/client-s3';
 import { getDb, saveDb } from '@/lib/db';
 
 export async function POST(request: Request) {
@@ -57,13 +57,44 @@ export async function POST(request: Request) {
       },
     });
 
-    const command = new DeleteObjectCommand({
-      Bucket: bucket,
-      Key: s3Key,
-    });
+    const isHls = s3Key.endsWith('playlist.m3u8');
 
-    await s3Client.send(command);
-    console.log(`Successfully deleted S3 object: ${s3Key} from bucket ${bucket}`);
+    if (isHls) {
+      // Find the folder prefix (up to the last slash)
+      const lastSlashIdx = s3Key.lastIndexOf('/');
+      const prefix = s3Key.substring(0, lastSlashIdx + 1);
+
+      console.log(`HLS bulk deletion triggered for prefix: ${prefix}`);
+      
+      // List all segment files inside the folder
+      const listCommand = new ListObjectsV2Command({
+        Bucket: bucket,
+        Prefix: prefix,
+      });
+      const listedObjects = await s3Client.send(listCommand);
+
+      if (listedObjects.Contents && listedObjects.Contents.length > 0) {
+        const deleteParams = {
+          Bucket: bucket,
+          Delete: {
+            Objects: listedObjects.Contents.map((obj) => ({ Key: obj.Key! })),
+          },
+        };
+        const deleteCommand = new DeleteObjectsCommand(deleteParams);
+        await s3Client.send(deleteCommand);
+        console.log(`Successfully deleted ${listedObjects.Contents.length} files under prefix "${prefix}" from bucket ${bucket}`);
+      } else {
+        console.log(`No objects found to delete under prefix "${prefix}"`);
+      }
+    } else {
+      // Non-HLS single object deletion
+      const command = new DeleteObjectCommand({
+        Bucket: bucket,
+        Key: s3Key,
+      });
+      await s3Client.send(command);
+      console.log(`Successfully deleted single S3 object: ${s3Key} from bucket ${bucket}`);
+    }
 
     // --- SQLite: log DELETE and remove record ---
     try {
