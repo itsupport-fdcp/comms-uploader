@@ -151,8 +151,18 @@ export async function POST(request: Request) {
         console.log(`Video duration: ${duration}s, size: ${info.size} bytes, format: ${info.format}`);
         
         // Ensure input height and width are rounded to even numbers for libx264 compliance
-        const inputHeight = info.height ? Math.floor(info.height / 2) * 2 : 720;
-        const inputWidth = info.width ? Math.floor(info.width / 2) * 2 : 1280;
+        let inputHeight = info.height ? Math.floor(info.height / 2) * 2 : 720;
+        let inputWidth = info.width ? Math.floor(info.width / 2) * 2 : 1280;
+
+        // Cap the maximum resolution to 1080p to prevent EC2 instances (like t2.micro/t3.micro with 1GB RAM)
+        // from running out of memory (OOM) and getting the FFmpeg process killed (Exit Code 137).
+        const MAX_HEIGHT_CAP = 1080;
+        if (inputHeight > MAX_HEIGHT_CAP) {
+          const scaleRatio = MAX_HEIGHT_CAP / inputHeight;
+          inputWidth = Math.floor((inputWidth * scaleRatio) / 2) * 2;
+          inputHeight = MAX_HEIGHT_CAP;
+        }
+
         const hasAudio = info.hasAudio ?? false;
 
         if (duration <= 0) {
