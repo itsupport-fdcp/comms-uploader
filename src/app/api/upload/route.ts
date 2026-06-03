@@ -91,6 +91,8 @@ export async function POST(request: Request) {
     const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
     const region = process.env.AWS_REGION || 'ap-southeast-1';
     const bucket = process.env.AWS_S3_BUCKET || 'fdcp-images';
+    const cdnDomain = process.env.CLOUDFRONT_DOMAIN || 'd2gve1gf1khwxe.cloudfront.net';
+    const cleanCdnDomain = cdnDomain.replace(/^https?:\/\//, '').replace(/\/$/, '');
 
     if (!accessKeyId || !secretAccessKey) {
       console.error('AWS credentials are not configured on the server.');
@@ -318,7 +320,7 @@ export async function POST(request: Request) {
       
       const allFiles = await getFilesRecursively(hlsTempDir);
       key = `${hlsS3Prefix}playlist.m3u8`;
-      publicUrl = `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
+      publicUrl = `https://${cleanCdnDomain}/${key}`;
 
       console.log(`Uploading HLS files to prefix: ${hlsS3Prefix}`);
       for (const absolutePath of allFiles) {
@@ -352,7 +354,7 @@ export async function POST(request: Request) {
     } else {
       // Standard single file upload (photos or fallback video)
       key = `${folder}${Date.now()}-${sanitizedName}`;
-      publicUrl = `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
+      publicUrl = `https://${cleanCdnDomain}/${key}`;
       compressedSize = fileContent!.length;
 
       const command = new PutObjectCommand({
