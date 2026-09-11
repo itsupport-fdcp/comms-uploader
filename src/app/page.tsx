@@ -942,10 +942,10 @@ export default function App() {
                   aria-valuemin={0}
                   aria-valuemax={100}
                   aria-valuenow={uploadPercent}
-                  className="h-2 w-full overflow-hidden rounded-full bg-sky-100"
+                  className="h-2 w-full overflow-hidden rounded-full bg-[#808080]"
                 >
                   <div
-                    className="h-full rounded-full bg-sky-500 transition-[width] duration-300 ease-out motion-reduce:transition-none"
+                    className="h-full rounded-full bg-[#008000]"
                     style={{ width: `${uploadPercent}%` }}
                   />
                 </div>
