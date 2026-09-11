@@ -35,7 +35,7 @@ import {
 } from 'firebase/auth';
 import type { User } from 'firebase/auth';
 import Hls from 'hls.js';
-import { uploadFile } from '@/lib/upload-client';
+import { getUploadErrorMessage, uploadFile } from '@/lib/upload-client';
 
 interface HlsVideoPlayerProps {
   src: string;
@@ -402,11 +402,11 @@ export default function App() {
           setSessionUploads((prev) => [newUploadItem, ...prev]);
         } else {
           console.error("Upload failed:", data.error);
-          setAuthError(`Upload failed: ${data.error}`);
+          setAuthError(`For "${file.name}": ${getUploadErrorMessage(undefined)}`);
         }
       } catch (error: any) {
         console.error("Error invoking upload:", error);
-        setAuthError(`Error uploading file: ${error.message || error}`);
+        setAuthError(`For "${file.name}": ${getUploadErrorMessage(error)}`);
       }
     }
     
@@ -448,11 +448,11 @@ export default function App() {
         };
         setSessionUploads((prev) => [newUploadItem, ...prev]);
       } else {
-        setAuthError(`Re-upload failed: ${data.error}`);
+        setAuthError(`For "${file.name}": ${getUploadErrorMessage(undefined)}`);
       }
     } catch (error: any) {
       console.error("Error in re-upload:", error);
-      setAuthError(`Error re-uploading file: ${error.message || error}`);
+      setAuthError(`For "${file.name}": ${getUploadErrorMessage(error)}`);
     } finally {
       setReuploadingId(null);
       setStatusMessage(null);
@@ -977,7 +977,7 @@ export default function App() {
                     <p className="text-xs text-slate-400 font-medium leading-relaxed">
                       {isUploading 
                         ? 'Applying client-side conversion or spawning adaptive server encoders. Please wait...' 
-                        : 'Photos will be converted to high-efficiency WebP under 1 MB. Videos will run server-side adaptive bitrates.'}
+                        : 'Up to 500 MB per file. Photos are converted to WebP. Videos are optimized for playback after uploading.'}
                     </p>
                     {!isUploading && (
                       <span className="inline-flex items-center text-xs font-bold text-brand-500 hover:text-brand-600 mt-2">
@@ -990,9 +990,9 @@ export default function App() {
 
               {/* Error notifications */}
               {authError && (
-                <div className="flex items-center space-x-3 p-4 bg-red-50 border border-red-100 text-red-700 text-xs rounded-2xl mb-6 animate-shake">
+                <div role="alert" className="flex items-start space-x-3 p-4 bg-red-50 border border-red-100 text-red-700 text-sm leading-relaxed rounded-2xl mb-6">
                   <AlertCircle className="h-4.5 w-4.5 text-red-500 flex-shrink-0" />
-                  <span className="font-semibold tracking-wide">{authError}</span>
+                  <span className="font-medium break-words min-w-0">{authError}</span>
                 </div>
               )}
 

@@ -19,7 +19,7 @@ const worker = globalJobs.uploadWorker ??= {
   jobs: new Map<string, Job>(), tail: Promise.resolve(), pending: 0,
 };
 
-export const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
+export const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
 
 export function reserveUpload(): string | null {
   for (const [id, job] of worker.jobs) {
@@ -53,7 +53,7 @@ export function runUpload(id: string, input: UploadInput): Promise<void> {
       console.error('Upload job failed:', id, error);
       worker.jobs.set(id, {
         status: 'failed', updatedAt: Date.now(),
-        error: error instanceof Error ? error.message : 'Upload processing failed.',
+        error: "We couldn't finish saving your file. Please try again. If this keeps happening, contact your IT team.",
       });
     } finally {
       await fs.rm(path.dirname(input.inputPath), { recursive: true, force: true }).catch(console.error);

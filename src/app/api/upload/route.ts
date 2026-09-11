@@ -21,7 +21,7 @@ export async function POST(request: Request) {
   try {
     if (Number(request.headers.get('content-length')) > MAX_UPLOAD_BYTES + 1024 * 1024) {
       releaseUpload(jobId);
-      return NextResponse.json({ success: false, error: 'Files must be 100 MB or smaller.' }, { status: 413 });
+      return NextResponse.json({ success: false, error: 'Files must be 500 MB or smaller.' }, { status: 413 });
     }
     const formData = await request.formData();
     const file = formData.get('file');
@@ -31,7 +31,7 @@ export async function POST(request: Request) {
     }
     if (file.size > MAX_UPLOAD_BYTES) {
       releaseUpload(jobId);
-      return NextResponse.json({ success: false, error: 'Files must be 100 MB or smaller.' }, { status: 413 });
+      return NextResponse.json({ success: false, error: 'Files must be 500 MB or smaller.' }, { status: 413 });
     }
 
     const tempRoot = path.join(process.cwd(), 'temp');

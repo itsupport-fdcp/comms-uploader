@@ -21,9 +21,9 @@ const client = load('src/lib/upload-client.ts');
 const json = (data, options = 200) => Response.json(data, typeof options === 'number' ? { status: options } : options);
 
 test('HTML gateway errors and malformed JSON produce readable errors', async () => {
-  await assert.rejects(client.parseUploadResponse(new Response('<html>Gateway timeout</html>', { status: 504 })), /gateway timed out/i);
-  await assert.rejects(client.parseUploadResponse(new Response('<html>too large</html>', { status: 413 })), /100 MB/);
-  await assert.rejects(client.parseUploadResponse(new Response('{broken', { headers: { 'content-type': 'application/json' } })), /invalid response/);
+  await assert.rejects(client.parseUploadResponse(new Response('<html>Gateway timeout</html>', { status: 504 })), /took too long.*Upload History/i);
+  await assert.rejects(client.parseUploadResponse(new Response('<html>too large</html>', { status: 413 })), /500 MB/);
+  await assert.rejects(client.parseUploadResponse(new Response('{broken', { headers: { 'content-type': 'application/json' } })), /couldn't confirm/);
 });
 
 test('client waits for completion, retries status only, and submits the file once', async t => {
@@ -48,7 +48,7 @@ test('client waits for completion, retries status only, and submits the file onc
 
 test('connection reset does not resend the file', async t => {
   const mock = t.mock.method(global, 'fetch', async () => { throw new TypeError('Failed to fetch'); });
-  await assert.rejects(client.uploadFile(new FormData()), /connection.*lost/i);
+  await assert.rejects(client.uploadFile(new FormData()), /lost contact.*internet connection/i);
   assert.equal(mock.mock.callCount(), 1);
 });
 
@@ -56,7 +56,24 @@ test('processing failure is surfaced without reporting completion', async t => {
   const replies = [json({ success: true, jobId: 'abc' }, 202), json({ success: false, status: 'failed', error: 'S3 denied' })];
   t.mock.method(global, 'fetch', async () => replies.shift());
   t.mock.method(global, 'setTimeout', callback => { callback(); return 0; });
-  await assert.rejects(client.uploadFile(new FormData()), /S3 denied/);
+  await assert.rejects(client.uploadFile(new FormData()), /couldn't finish saving.*IT team/);
+});
+
+test('technical server errors and unexpected browser errors stay out of user messages', async () => {
+  await assert.rejects(client.parseUploadResponse(json({ success: false, error: 'AccessDenied: secret bucket ARN' }, 500)), error => {
+    assert.match(error.message, /upload service.*IT team/);
+    assert.doesNotMatch(error.message, /AccessDenied|ARN|secret/);
+    return true;
+  });
+  assert.doesNotMatch(client.getUploadErrorMessage(new Error('Unexpected token <html>')), /Unexpected token|html/);
+});
+
+test('missing upload status shows a next step without repeated polling', async t => {
+  const replies = [json({ success: true, jobId: 'abc' }, 202), json({ success: false }, 404)];
+  const mock = t.mock.method(global, 'fetch', async () => replies.shift());
+  t.mock.method(global, 'setTimeout', callback => { callback(); return 0; });
+  await assert.rejects(client.uploadFile(new FormData()), /no longer check.*Upload History/);
+  assert.equal(mock.mock.callCount(), 2);
 });
 
 test('queue serializes processing, bounds admission, and releases failed jobs', async t => {
@@ -94,7 +111,7 @@ test('intake returns 202 before processing and status is never cached', async ()
   const route = load('src/app/api/upload/route.ts', {
     'next/server': { after: callback => { afterCallback = callback; }, NextResponse: { json } },
     '@/lib/upload-jobs': {
-      MAX_UPLOAD_BYTES: 100 * 1024 * 1024, reserveUpload: () => 'test-job', releaseUpload: () => {},
+      MAX_UPLOAD_BYTES: 500 * 1024 * 1024, reserveUpload: () => 'test-job', releaseUpload: () => {},
       runUpload: async (_id, staged) => { input = staged; },
       getUploadJob: () => ({ status: 'processing' }),
     },
