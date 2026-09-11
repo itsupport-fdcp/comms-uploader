@@ -935,7 +935,21 @@ export default function App() {
                 <span role="status" className="flex-1">{statusMessage || 'Preparing your file...'}</span>
                 {uploadPercent !== undefined && <span>{uploadPercent}%</span>}
               </div>
-              {uploadPercent !== undefined && <progress className="w-full h-2 accent-sky-500" max={100} value={uploadPercent} aria-label={statusMessage || 'Current step progress'} />}
+              {uploadPercent !== undefined && (
+                <div
+                  role="progressbar"
+                  aria-label={statusMessage || 'Current step progress'}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={uploadPercent}
+                  className="h-2 w-full overflow-hidden rounded-full bg-sky-100"
+                >
+                  <div
+                    className="h-full rounded-full bg-sky-500 transition-[width] duration-300 ease-out motion-reduce:transition-none"
+                    style={{ width: `${uploadPercent}%` }}
+                  />
+                </div>
+              )}
               <p className="text-xs text-slate-600">Progress is for the current step. Keep this page open until your file is ready.</p>
             </section>
           )}
