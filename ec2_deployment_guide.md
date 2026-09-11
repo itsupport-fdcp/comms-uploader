@@ -156,6 +156,11 @@ server {
     client_max_body_size 501M;
     client_body_timeout 300s;
 
+    # Increase upstream timeouts for long-running video compression jobs
+    proxy_connect_timeout 300s;
+    proxy_read_timeout 300s;
+    proxy_send_timeout 300s;
+
     location / {
         proxy_pass http://localhost:3000;
         proxy_http_version 1.1;
