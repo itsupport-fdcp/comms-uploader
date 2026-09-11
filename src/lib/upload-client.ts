@@ -1,6 +1,8 @@
 type UploadResponse = {
   success: boolean;
   error?: string;
+  message?: string;
+  percent?: number;
   jobId?: string;
   status?: 'queued' | 'processing' | 'completed' | 'failed';
   url?: string;
@@ -50,12 +52,13 @@ export async function parseUploadResponse(res: Response): Promise<UploadResponse
   return data;
 }
 
-export async function uploadFile(formData: FormData, onStatus?: (message: string) => void) {
+export async function uploadFile(formData: FormData, onStatus?: (message: string, percent?: number) => void) {
   const file = formData.get('file');
   if (file instanceof File && file.size > 500 * 1024 * 1024) {
     throw new UploadError('This file is too large. Choose a file 500 MB or smaller and try again.');
   }
   let response: Response;
+  onStatus?.('Sending your file...');
   try {
     response = await fetch('/api/upload', { method: 'POST', body: formData });
   } catch {
@@ -73,7 +76,9 @@ export async function uploadFile(formData: FormData, onStatus?: (message: string
   const deadline = Date.now() + 3 * 60 * 60 * 1000;
   let failures = 0;
   while (Date.now() < deadline) {
-    onStatus?.(data.status === 'queued' ? 'Upload received. Waiting to process...' : 'Processing and saving your upload...');
+    onStatus?.(failures > 0 ? 'Reconnecting to check progress...' :
+      data.status === 'queued' ? 'Upload received. Waiting to process...' :
+      data.message || 'Processing and saving your upload...', failures > 0 ? undefined : data.percent);
     await new Promise(resolve => setTimeout(resolve, 2000));
     try {
       const statusResponse = await fetch(`/api/upload?jobId=${encodeURIComponent(jobId)}`, {

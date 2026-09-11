@@ -82,10 +82,11 @@ function sanitizeFilename(filename: string): string {
     .replace(/[^a-z0-9.-]/g, '');
 }
 
-export async function processUpload(file: UploadInput) {
+export async function processUpload(file: UploadInput, onProgress?: (message: string, percent?: number) => void) {
   let hlsTempDir = '';
   try {
     const { eventId, uploadedBy } = file;
+    onProgress?.('Checking your file...');
 
     const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
     const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
@@ -210,7 +211,9 @@ export async function processUpload(file: UploadInput) {
           console.log(`Active resolution profiles to encode: ${activeProfiles.map(p => p.name).join(', ')}`);
 
           // 5. Transcode each profile sequentially
-          for (const profile of activeProfiles) {
+          for (const [profileIndex, profile] of activeProfiles.entries()) {
+            const progressLabel = `Preparing video quality ${profileIndex + 1} of ${activeProfiles.length}`;
+            onProgress?.(progressLabel, 0);
             const profileDir = path.join(hlsTempDir, profile.name);
             await fs.mkdir(profileDir, { recursive: true });
 
@@ -222,8 +225,9 @@ export async function processUpload(file: UploadInput) {
             const audioArgs = hasAudio ? ['-c:a', 'aac', '-b:a', '128k'] : ['-an'];
             console.log('[HLS] Encoding', profile.name);
             const startTime = Date.now();
-            await execFilePromise('ffmpeg', [
+            const encoding = execFilePromise('ffmpeg', [
               '-hide_banner', '-loglevel', 'error', '-nostdin', '-y',
+              '-progress', 'pipe:1', '-nostats',
               '-threads', '1', '-i', ffmpegTempInputPath,
               '-c:v', 'libx264', '-threads', '1', '-filter_threads', '1',
               '-preset', 'fast', '-b:v', profile.bitrateKbps + 'k',
@@ -232,6 +236,20 @@ export async function processUpload(file: UploadInput) {
               ...audioArgs, '-hls_time', '6', '-hls_playlist_type', 'vod',
               '-hls_segment_filename', ffmpegSegmentPath, ffmpegPlaylistPath,
             ], { timeout: 30 * 60 * 1000, maxBuffer: 4 * 1024 * 1024 });
+            let progressBuffer = '';
+            encoding.child?.stdout?.on('data', (chunk: Buffer | string) => {
+              progressBuffer += chunk.toString();
+              const lines = progressBuffer.split('\n');
+              progressBuffer = lines.pop() || '';
+              for (const line of lines) {
+                const match = /^out_time_us=(\d+)/.exec(line);
+                if (match) {
+                  onProgress?.(progressLabel, Math.min(99, Math.floor(Number(match[1]) / (duration * 1000000) * 100)));
+                }
+              }
+            });
+            await encoding;
+            onProgress?.(progressLabel, 100);
             const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
             console.log(`[HLS] Completed encoding ${profile.name} in ${elapsed}s.`);
           }
@@ -302,6 +320,8 @@ export async function processUpload(file: UploadInput) {
       publicUrl = `https://${cleanCdnDomain}/${key}`;
 
       console.log(`Uploading HLS files to prefix: ${hlsS3Prefix}`);
+      let savedFiles = 0;
+      onProgress?.('Saving your video...', 0);
       for (const absolutePath of allFiles) {
         const relativePath = path.relative(hlsTempDir, absolutePath);
         const s3RelativePath = relativePath.replace(/\\/g, '/');
@@ -319,6 +339,7 @@ export async function processUpload(file: UploadInput) {
           ContentType: fileContentType,
           ContentDisposition: 'inline',
         }));
+        onProgress?.('Saving your video...', Math.floor(++savedFiles / allFiles.length * 100));
       }
 
       console.log(`HLS upload completed. Total size: ${hlsTotalSize} bytes.`);
@@ -326,6 +347,7 @@ export async function processUpload(file: UploadInput) {
 
     } else {
       // Standard single file upload (photos or fallback video)
+      onProgress?.('Saving your file...');
       key = `${folder}${crypto.randomUUID()}-${sanitizedName}`;
       publicUrl = `https://${cleanCdnDomain}/${key}`;
       compressedSize = fileContent?.length ?? file.size;
@@ -344,6 +366,7 @@ export async function processUpload(file: UploadInput) {
     }
 
     // --- SQLite: record upload ---
+    onProgress?.('Finishing up...');
     let uploadId: number | null = null;
     try {
       const db = await getDb();

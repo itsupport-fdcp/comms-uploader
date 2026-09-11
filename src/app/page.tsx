@@ -209,6 +209,13 @@ export default function App() {
   const [dashboardTab, setDashboardTab] = useState<'upload' | 'history'>('upload');
   const [isUploading, setIsUploading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [uploadPercent, setUploadPercent] = useState<number | undefined>();
+  const [activeFilename, setActiveFilename] = useState<string | null>(null);
+  const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
+  const reportUploadProgress = useCallback((message: string, percent?: number) => {
+    setStatusMessage(message);
+    setUploadPercent(percent);
+  }, []);
   const [uploads, setUploads] = useState<any[]>([]);
   const [sessionUploads, setSessionUploads] = useState<any[]>([]);
 
@@ -366,8 +373,11 @@ export default function App() {
     if (!user || isUploading) return;
     setIsUploading(true);
     setAuthError(null);
+    setUploadSuccess(null);
     
     for (const file of acceptedFiles) {
+      setActiveFilename(file.name);
+      setUploadPercent(undefined);
       try {
         let processedFile = file;
         const isImage = file.type.startsWith('image/');
@@ -387,9 +397,11 @@ export default function App() {
         formData.append('event_id', String(selectedEventId || 1));
         formData.append('uploaded_by', user.email || 'anonymous');
 
-        const data = await uploadFile(formData, setStatusMessage);
+        const data = await uploadFile(formData, reportUploadProgress);
 
         if (data.success) {
+          setUploadSuccess(`"${file.name}" was uploaded successfully. Your link is ready.`);
+          setUploadPercent(undefined);
           setStatusMessage("Refreshing history...");
           await fetchHistory();
           const newUploadItem = {
@@ -411,12 +423,17 @@ export default function App() {
     }
     
     setIsUploading(false);
+    setActiveFilename(null);
     setStatusMessage(null);
-  }, [user, selectedEventId, isUploading]);
+  }, [user, selectedEventId, isUploading, reportUploadProgress]);
 
   // Re-upload in place
   const handleReupload = async (id: string, file: File) => {
-    if (!user) return;
+    if (!user || isUploading) return;
+    setIsUploading(true);
+    setActiveFilename(file.name);
+    setUploadSuccess(null);
+    reportUploadProgress('Preparing your file...');
     setReuploadingId(id);
     setAuthError(null);
 
@@ -435,9 +452,11 @@ export default function App() {
       formData.append('uploaded_by', user.email || 'anonymous');
 
       // Upload replacement file
-      const data = await uploadFile(formData, setStatusMessage);
+      const data = await uploadFile(formData, reportUploadProgress);
 
       if (data.success) {
+        setUploadSuccess(`"${file.name}" was uploaded successfully. Your link is ready.`);
+        reportUploadProgress('Refreshing history...');
         await fetchHistory();
         const newUploadItem = {
           id: data.uploadId || Date.now().toString(),
@@ -455,6 +474,8 @@ export default function App() {
       setAuthError(`For "${file.name}": ${getUploadErrorMessage(error)}`);
     } finally {
       setReuploadingId(null);
+      setIsUploading(false);
+      setActiveFilename(null);
       setStatusMessage(null);
     }
   };
@@ -513,7 +534,7 @@ export default function App() {
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({ 
     onDrop,
-    disabled: !user 
+    disabled: !user || isUploading
   });
 
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
@@ -879,6 +900,27 @@ export default function App() {
             </div>
           </header>
 
+          {isUploading && (
+            <div className="rounded-2xl border border-sky-200 bg-sky-50 p-5 space-y-3" aria-busy="true">
+              <p className="text-sm font-semibold text-slate-800 break-words">{activeFilename}</p>
+              <div className="flex justify-between gap-4 text-sm font-medium text-sky-800">
+                <span role="status">{statusMessage || 'Preparing your file...'}</span>
+                {uploadPercent !== undefined && <span>{uploadPercent}%</span>}
+              </div>
+              {uploadPercent !== undefined && (
+                <progress className="w-full h-3 accent-sky-500" max={100} value={uploadPercent} aria-label={statusMessage || 'Current step progress'} />
+              )}
+              <p className="text-xs text-slate-600">{uploadPercent !== undefined ? 'Progress is for the current step. ' : ''}Videos may take several minutes. Keep this page open; we will confirm when your file is ready.</p>
+            </div>
+          )}
+          {uploadSuccess && (
+            <div role="status" className="flex items-start gap-3 rounded-2xl border border-green-200 bg-green-50 p-5 text-green-800">
+              <CheckCircle className="h-5 w-5 shrink-0" />
+              <p className="flex-1 text-sm break-words">{uploadSuccess}</p>
+              <button type="button" onClick={() => setUploadSuccess(null)} aria-label="Dismiss upload confirmation"><X className="h-5 w-5" /></button>
+            </div>
+          )}
+
           {/* Tab 1: Upload Console */}
           {dashboardTab === 'upload' && (
             <div className="space-y-6 animate-fade-in">
@@ -976,7 +1018,7 @@ export default function App() {
                     </p>
                     <p className="text-xs text-slate-400 font-medium leading-relaxed">
                       {isUploading 
-                        ? 'Applying client-side conversion or spawning adaptive server encoders. Please wait...' 
+                        ? 'Follow the progress above. We will let you know when your file is ready.'
                         : 'Up to 500 MB per file. Photos are converted to WebP. Videos are optimized for playback after uploading.'}
                     </p>
                     {!isUploading && (

@@ -32,7 +32,7 @@ test('client waits for completion, retries status only, and submits the file onc
   const replies = [
     json({ success: true, jobId: 'abc', status: 'queued' }, 202),
     new Response('<html>bad gateway</html>', { status: 502 }),
-    json({ success: true, status: 'processing' }),
+    json({ success: true, status: 'processing', message: 'Preparing video quality 2 of 4', percent: 43 }),
     json({ success: true, status: 'completed', result: { success: true, url: 'https://cdn/test.m3u8' } }),
   ];
   t.mock.method(global, 'fetch', async (_url, options) => {
@@ -40,10 +40,13 @@ test('client waits for completion, retries status only, and submits the file onc
     return replies.shift();
   });
   t.mock.method(global, 'setTimeout', callback => { callback(); return 0; });
-  const result = await client.uploadFile(new FormData(), status => statuses.push(status));
+  const percentages = [];
+  const result = await client.uploadFile(new FormData(), (status, percent) => { statuses.push(status); percentages.push(percent); });
   assert.equal(result.url, 'https://cdn/test.m3u8');
   assert.deepEqual(methods, ['POST', 'GET', 'GET', 'GET']);
   assert.ok(statuses.some(status => status.includes('Waiting')));
+  assert.ok(statuses.includes('Preparing video quality 2 of 4'));
+  assert.ok(percentages.includes(43));
 });
 
 test('connection reset does not resend the file', async t => {
@@ -81,7 +84,7 @@ test('queue serializes processing, bounds admission, and releases failed jobs', 
   const finishes = [];
   const calls = [];
   const jobs = load('src/lib/upload-jobs.ts', {
-    './process-upload': { processUpload: input => { calls.push(input.name); return new Promise((resolve, reject) => finishes.push({ resolve, reject })); } },
+    './process-upload': { processUpload: (input, onProgress) => { calls.push(input.name); onProgress('Preparing video quality 1 of 4', 25); return new Promise((resolve, reject) => finishes.push({ resolve, reject })); } },
     'node:fs': { promises: { rm: async () => {} } },
   });
   t.mock.method(console, 'error', () => {});
@@ -92,6 +95,8 @@ test('queue serializes processing, bounds admission, and releases failed jobs', 
   const second = jobs.runUpload(ids[1], { name: 'two', inputPath: '/mock/two/source' });
   await Promise.resolve();
   assert.deepEqual(calls, ['one']);
+  assert.equal(jobs.getUploadJob(ids[0]).percent, 25);
+  assert.equal(jobs.getUploadJob(ids[0]).status, 'processing');
   assert.equal(jobs.getUploadJob(ids[1]).status, 'queued');
   finishes[0].reject(new Error('S3 denied'));
   await first;
@@ -151,17 +156,29 @@ test('video processing encodes with bounded threads, uploads HLS, records histor
       saveDb: () => {},
     },
     util: { promisify: fn => fn },
-    child_process: { execFile: async (command, args) => {
+    child_process: { execFile: (command, args) => {
       commands.push({ command, args });
-      if (command === 'ffprobe') return { stdout: JSON.stringify({ format: { duration: '1', size: '5' }, streams: [{ codec_type: 'video', width: 426, height: 240 }] }) };
+      if (command === 'ffprobe') return Promise.resolve({ stdout: JSON.stringify({ format: { duration: '1', size: '5' }, streams: [{ codec_type: 'video', width: 426, height: 240 }] }) });
       const playlist = args.at(-1);
       outputDir = path.resolve(path.dirname(playlist), '..');
       fs.writeFileSync(playlist, '#EXTM3U\nseg_000.ts');
       fs.writeFileSync(path.join(path.dirname(playlist), 'seg_000.ts'), 'segment');
-      return { stdout: '' };
+      const stdout = new (require('node:events').EventEmitter)();
+      const encoding = new Promise(resolve => setImmediate(() => {
+        stdout.emit('data', 'out_time_');
+        stdout.emit('data', 'us=500000\n');
+        resolve({ stdout: '' });
+      }));
+      encoding.child = { stdout };
+      return encoding;
     } },
   });
-  const result = await processor.processUpload({ name: 'movie.mp4', type: 'video/mp4', size: 5, inputPath: 'mock-source', eventId: 1, uploadedBy: 'tester' });
+  const progress = [];
+  const result = await processor.processUpload({ name: 'movie.mp4', type: 'video/mp4', size: 5, inputPath: 'mock-source', eventId: 1, uploadedBy: 'tester' }, (message, percent) => progress.push({ message, percent }));
+  assert.ok(progress.some(step => step.message === 'Preparing video quality 1 of 1' && step.percent === 100));
+  assert.ok(progress.some(step => step.message === 'Preparing video quality 1 of 1' && step.percent === 50));
+  assert.ok(progress.some(step => step.message === 'Saving your video...' && step.percent === 100));
+  assert.equal(progress.at(-1).message, 'Finishing up...');
   assert.equal(result.uploadId, 42);
   assert.ok(result.url.endsWith('/playlist.m3u8'));
   assert.equal(uploads.length, 3);

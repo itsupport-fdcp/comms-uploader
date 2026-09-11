@@ -9,6 +9,8 @@ type Job = {
   updatedAt: number;
   result?: UploadResult;
   error?: string;
+  message?: string;
+  percent?: number;
 };
 
 // One worker per Node process; shared by all route bundles.
@@ -47,7 +49,9 @@ export function runUpload(id: string, input: UploadInput): Promise<void> {
   const work = worker.tail.then(async () => {
     worker.jobs.set(id, { status: 'processing', updatedAt: Date.now() });
     try {
-      const result = await processUpload(input);
+      const result = await processUpload(input, (message, percent) => {
+        worker.jobs.set(id, { status: 'processing', updatedAt: Date.now(), message, percent });
+      });
       worker.jobs.set(id, { status: 'completed', updatedAt: Date.now(), result });
     } catch (error) {
       console.error('Upload job failed:', id, error);
