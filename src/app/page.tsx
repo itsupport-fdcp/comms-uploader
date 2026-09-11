@@ -35,6 +35,7 @@ import {
 } from 'firebase/auth';
 import type { User } from 'firebase/auth';
 import Hls from 'hls.js';
+import { uploadFile } from '@/lib/upload-client';
 
 interface HlsVideoPlayerProps {
   src: string;
@@ -360,9 +361,9 @@ export default function App() {
     }
   };
 
-  // Uploader Drop handler (with client-side conversion to WebP and serverless POST)
+  // Uploader with client-side WebP conversion and background processing
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
-    if (!user) return;
+    if (!user || isUploading) return;
     setIsUploading(true);
     setAuthError(null);
     
@@ -386,12 +387,7 @@ export default function App() {
         formData.append('event_id', String(selectedEventId || 1));
         formData.append('uploaded_by', user.email || 'anonymous');
 
-        const res = await fetch('/api/upload', {
-          method: 'POST',
-          body: formData,
-        });
-
-        const data = await res.json();
+        const data = await uploadFile(formData, setStatusMessage);
 
         if (data.success) {
           setStatusMessage("Refreshing history...");
@@ -407,18 +403,16 @@ export default function App() {
         } else {
           console.error("Upload failed:", data.error);
           setAuthError(`Upload failed: ${data.error}`);
-          setTimeout(() => setAuthError(null), 5000);
         }
       } catch (error: any) {
         console.error("Error invoking upload:", error);
         setAuthError(`Error uploading file: ${error.message || error}`);
-        setTimeout(() => setAuthError(null), 5000);
       }
     }
     
     setIsUploading(false);
     setStatusMessage(null);
-  }, [user, selectedEventId]);
+  }, [user, selectedEventId, isUploading]);
 
   // Re-upload in place
   const handleReupload = async (id: string, file: File) => {
@@ -441,12 +435,7 @@ export default function App() {
       formData.append('uploaded_by', user.email || 'anonymous');
 
       // Upload replacement file
-      const res = await fetch('/api/upload', {
-        method: 'POST',
-        body: formData,
-      });
-
-      const data = await res.json();
+      const data = await uploadFile(formData, setStatusMessage);
 
       if (data.success) {
         await fetchHistory();
@@ -460,14 +449,13 @@ export default function App() {
         setSessionUploads((prev) => [newUploadItem, ...prev]);
       } else {
         setAuthError(`Re-upload failed: ${data.error}`);
-        setTimeout(() => setAuthError(null), 5000);
       }
     } catch (error: any) {
       console.error("Error in re-upload:", error);
       setAuthError(`Error re-uploading file: ${error.message || error}`);
-      setTimeout(() => setAuthError(null), 5000);
     } finally {
       setReuploadingId(null);
+      setStatusMessage(null);
     }
   };
 

@@ -152,7 +152,9 @@ server {
     server_name yourdomain.com;
 
     # Increase maximum request body size to allow large photo & video uploads
-    client_max_body_size 100M;
+    # 100 MB file plus multipart metadata
+    client_max_body_size 101M;
+    client_body_timeout 300s;
 
     location / {
         proxy_pass http://localhost:3000;
@@ -189,3 +191,15 @@ sudo certbot --nginx -d yourdomain.com
 ```
 
 Confirm all prompts to configure SSL and automatically redirect HTTP traffic to HTTPS. Your production EC2-powered S3 Comms Uploader is now ready for massive files and real-time history backtracking!
+
+## Upload timeout fix: background processing
+
+`POST /api/upload` now stages the file and returns HTTP 202 with a job ID. The page polls `GET /api/upload?jobId=...` until encoding, S3 writes, and history recording finish. The original HTTP request no longer waits through all HLS encodes. Both regular uploads and replacement uploads use this flow.
+
+Deploy the frontend and API together, rebuild (`npm run build`), and restart the existing PM2 application (`pm2 restart comms-uploader --update-env`). Apply the Nginx body-size and timeout settings above to the active HTTPS server block as well, then validate with `sudo nginx -t` before `sudo systemctl reload nginx`. A 100 MB file needs extra allowance for multipart metadata.
+
+Run this implementation on **one persistent Node process** using `next start` (the PM2 setup above). It queues at most four uploads, processes one at a time, and uses one FFmpeg encoding thread. Jobs are held in process memory; a restart interrupts pending jobs and status reads then advise checking history before retrying. Completed status entries expire after 24 hours or when the retained-entry limit is reached. Temporary source and HLS files are removed after each job; a process kill can leave files in `temp` for an operator to clean up while the app is stopped. Do not use PM2 cluster mode or multiple replicas with this local queue. A multi-instance or serverless deployment requires a durable external queue and worker; `maxDuration` does not override a gateway timeout or hosting execution limit.
+
+If a connection still resets during the initial file transfer, check `pm2 logs comms-uploader --lines 100`, the Nginx error log, and `sudo journalctl -k` for an out-of-memory kill. Multipart intake still consumes memory, so the 100 MB limit and sequential processing reduce pressure but do not guarantee that a small instance has sufficient RAM. Verify the instance's free memory and disk space. The application now supports the AWS SDK credential chain, including the EC2 IAM role, when explicit access keys are absent.
+
+Smoke test after deployment: upload a photo, then a video whose encoding takes longer than the proxy timeout. In browser Network tools, verify the POST returns 202 promptly after transfer, status GETs remain short, and the completed URL appears in Upload History. Also test an interrupted connection; the page must show a readable error rather than an HTML/JSON parsing exception.
