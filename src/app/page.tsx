@@ -209,12 +209,35 @@ export default function App() {
   const [dashboardTab, setDashboardTab] = useState<'upload' | 'history'>('upload');
   const [isUploading, setIsUploading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [uploadToasts, setUploadToasts] = useState<{ id: string; message: string; expiresAt: number }[]>([]);
+  const seenUploadEvents = useRef(0);
+  const toastFilename = useRef('');
+  useEffect(() => {
+    if (!uploadToasts.length) return;
+    const timer = setInterval(() => {
+      setUploadToasts(current => current.filter(toast => toast.expiresAt > Date.now()));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [uploadToasts.length]);
   const [uploadPercent, setUploadPercent] = useState<number | undefined>();
   const [activeFilename, setActiveFilename] = useState<string | null>(null);
   const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
-  const reportUploadProgress = useCallback((message: string, percent?: number) => {
+  const reportUploadProgress = useCallback((message: string, percent?: number, activity?: string[]) => {
     setStatusMessage(message);
     setUploadPercent(percent);
+    if (activity) {
+      const completed = activity.slice(seenUploadEvents.current)
+        .filter(entry => entry.startsWith('[HLS] Completed encoding'));
+      seenUploadEvents.current = activity.length;
+      if (completed.length) {
+        const added = completed.map(entry => ({
+          id: crypto.randomUUID(),
+          message: toastFilename.current + ': ' + entry.replace('[HLS] ', ''),
+          expiresAt: Date.now() + 10000,
+        }));
+        setUploadToasts(current => [...current, ...added].slice(-4));
+      }
+    }
   }, []);
   const [uploads, setUploads] = useState<any[]>([]);
   const [sessionUploads, setSessionUploads] = useState<any[]>([]);
@@ -377,6 +400,8 @@ export default function App() {
     
     for (const file of acceptedFiles) {
       setActiveFilename(file.name);
+      seenUploadEvents.current = 0;
+      toastFilename.current = file.name;
       setUploadPercent(undefined);
       try {
         let processedFile = file;
@@ -423,7 +448,7 @@ export default function App() {
     }
     
     setIsUploading(false);
-    setActiveFilename(null);
+
     setStatusMessage(null);
   }, [user, selectedEventId, isUploading, reportUploadProgress]);
 
@@ -432,6 +457,8 @@ export default function App() {
     if (!user || isUploading) return;
     setIsUploading(true);
     setActiveFilename(file.name);
+      seenUploadEvents.current = 0;
+      toastFilename.current = file.name;
     setUploadSuccess(null);
     reportUploadProgress('Preparing your file...');
     setReuploadingId(id);
@@ -475,7 +502,7 @@ export default function App() {
     } finally {
       setReuploadingId(null);
       setIsUploading(false);
-      setActiveFilename(null);
+
       setStatusMessage(null);
     }
   };
@@ -901,25 +928,33 @@ export default function App() {
           </header>
 
           {isUploading && (
-            <div className="rounded-2xl border border-sky-200 bg-sky-50 p-5 space-y-3" aria-busy="true">
+            <section className="rounded-2xl border border-sky-200 bg-sky-50 p-5 space-y-3" aria-label="Upload progress">
               <p className="text-sm font-semibold text-slate-800 break-words">{activeFilename}</p>
-              <div className="flex justify-between gap-4 text-sm font-medium text-sky-800">
-                <span role="status">{statusMessage || 'Preparing your file...'}</span>
+              <div className="flex items-center gap-3 text-sm text-sky-800">
+                <Loader2 className="h-5 w-5 shrink-0 animate-spin" />
+                <span role="status" className="flex-1">{statusMessage || 'Preparing your file...'}</span>
                 {uploadPercent !== undefined && <span>{uploadPercent}%</span>}
               </div>
-              {uploadPercent !== undefined && (
-                <progress className="w-full h-3 accent-sky-500" max={100} value={uploadPercent} aria-label={statusMessage || 'Current step progress'} />
-              )}
-              <p className="text-xs text-slate-600">{uploadPercent !== undefined ? 'Progress is for the current step. ' : ''}Videos may take several minutes. Keep this page open; we will confirm when your file is ready.</p>
-            </div>
+              {uploadPercent !== undefined && <progress className="w-full h-2 accent-sky-500" max={100} value={uploadPercent} aria-label={statusMessage || 'Current step progress'} />}
+              <p className="text-xs text-slate-600">Progress is for the current step. Keep this page open until your file is ready.</p>
+            </section>
           )}
-          {uploadSuccess && (
-            <div role="status" className="flex items-start gap-3 rounded-2xl border border-green-200 bg-green-50 p-5 text-green-800">
-              <CheckCircle className="h-5 w-5 shrink-0" />
-              <p className="flex-1 text-sm break-words">{uploadSuccess}</p>
-              <button type="button" onClick={() => setUploadSuccess(null)} aria-label="Dismiss upload confirmation"><X className="h-5 w-5" /></button>
-            </div>
-          )}
+          <div className="fixed bottom-5 right-5 left-5 sm:left-auto sm:w-96 z-50 space-y-3" aria-label="Upload notifications">
+            {uploadToasts.map(toast => (
+              <div key={toast.id} role="status" className="flex items-start gap-3 rounded-2xl border border-green-200 bg-white p-4 shadow-lg text-green-800">
+                <CheckCircle className="h-5 w-5 shrink-0" />
+                <p className="flex-1 min-w-0 text-sm break-words">{toast.message}</p>
+                <button type="button" onClick={() => setUploadToasts(current => current.filter(item => item.id !== toast.id))} aria-label="Dismiss completed step"><X className="h-5 w-5" /></button>
+              </div>
+            ))}
+            {uploadSuccess && (
+              <div role="status" className="flex items-start gap-3 rounded-2xl border border-green-200 bg-green-50 p-4 shadow-lg text-green-800">
+                <CheckCircle className="h-5 w-5 shrink-0" />
+                <p className="flex-1 min-w-0 text-sm break-words">{uploadSuccess}</p>
+                <button type="button" onClick={() => setUploadSuccess(null)} aria-label="Dismiss upload confirmation"><X className="h-5 w-5" /></button>
+              </div>
+            )}
+          </div>
 
           {/* Tab 1: Upload Console */}
           {dashboardTab === 'upload' && (
@@ -991,7 +1026,7 @@ export default function App() {
               </div>
 
               {/* Upload Zone */}
-              <div
+              {!isUploading && <div
                 {...getRootProps()}
                 className={`border-2 border-dashed rounded-3xl p-16 text-center cursor-pointer transition-all duration-300 ease-in-out shadow-sm ${
                   isDragActive
@@ -1028,7 +1063,7 @@ export default function App() {
                     )}
                   </div>
                 </div>
-              </div>
+              </div>}
 
               {/* Error notifications */}
               {authError && (

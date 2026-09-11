@@ -96,6 +96,7 @@ test('queue serializes processing, bounds admission, and releases failed jobs', 
   await Promise.resolve();
   assert.deepEqual(calls, ['one']);
   assert.equal(jobs.getUploadJob(ids[0]).percent, 25);
+  assert.ok(jobs.getUploadJob(ids[0]).activity.includes('Preparing video quality 1 of 4'));
   assert.equal(jobs.getUploadJob(ids[0]).status, 'processing');
   assert.equal(jobs.getUploadJob(ids[1]).status, 'queued');
   finishes[0].reject(new Error('S3 denied'));
@@ -106,6 +107,7 @@ test('queue serializes processing, bounds admission, and releases failed jobs', 
   finishes[1].resolve({ success: true, url: 'https://cdn/two' });
   await second;
   assert.equal(jobs.getUploadJob(ids[1]).result.url, 'https://cdn/two');
+  assert.equal(jobs.getUploadJob(ids[1]).activity.at(-1), 'Upload completed. Your file is ready.');
   assert.ok(jobs.reserveUpload());
   delete global.uploadWorker;
 });
@@ -175,10 +177,11 @@ test('video processing encodes with bounded threads, uploads HLS, records histor
   });
   const progress = [];
   const result = await processor.processUpload({ name: 'movie.mp4', type: 'video/mp4', size: 5, inputPath: 'mock-source', eventId: 1, uploadedBy: 'tester' }, (message, percent) => progress.push({ message, percent }));
-  assert.ok(progress.some(step => step.message === 'Preparing video quality 1 of 1' && step.percent === 100));
-  assert.ok(progress.some(step => step.message === 'Preparing video quality 1 of 1' && step.percent === 50));
+  assert.ok(progress.some(step => step.message === '[HLS] Encoding 240p (1 of 1)' && step.percent === 100));
+  assert.ok(progress.some(step => step.message === '[HLS] Encoding 240p (1 of 1)' && step.percent === 50));
   assert.ok(progress.some(step => step.message === 'Saving your video...' && step.percent === 100));
   assert.equal(progress.at(-1).message, 'Finishing up...');
+  assert.ok(progress.some(step => /Completed encoding 240p in [0-9.]+s/.test(step.message)));
   assert.equal(result.uploadId, 42);
   assert.ok(result.url.endsWith('/playlist.m3u8'));
   assert.equal(uploads.length, 3);

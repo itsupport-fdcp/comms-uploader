@@ -3,6 +3,7 @@ type UploadResponse = {
   error?: string;
   message?: string;
   percent?: number;
+  activity?: string[];
   jobId?: string;
   status?: 'queued' | 'processing' | 'completed' | 'failed';
   url?: string;
@@ -52,7 +53,7 @@ export async function parseUploadResponse(res: Response): Promise<UploadResponse
   return data;
 }
 
-export async function uploadFile(formData: FormData, onStatus?: (message: string, percent?: number) => void) {
+export async function uploadFile(formData: FormData, onStatus?: (message: string, percent?: number, activity?: string[]) => void) {
   const file = formData.get('file');
   if (file instanceof File && file.size > 500 * 1024 * 1024) {
     throw new UploadError('This file is too large. Choose a file 500 MB or smaller and try again.');
@@ -87,6 +88,7 @@ export async function uploadFile(formData: FormData, onStatus?: (message: string
       // Retry status reads only. Never automatically resend a file.
       if (statusResponse.status >= 500) throw new Error('Upload status temporarily unavailable.');
       data = await parseUploadResponse(statusResponse);
+      onStatus?.(data.message || (data.status === 'completed' ? 'Upload completed.' : 'Processing your file...'), data.percent, data.activity);
       failures = 0;
     } catch (error) {
       if (error instanceof UploadError && error.status && error.status >= 400 && error.status < 500) throw error;

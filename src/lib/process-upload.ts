@@ -212,7 +212,7 @@ export async function processUpload(file: UploadInput, onProgress?: (message: st
 
           // 5. Transcode each profile sequentially
           for (const [profileIndex, profile] of activeProfiles.entries()) {
-            const progressLabel = `Preparing video quality ${profileIndex + 1} of ${activeProfiles.length}`;
+            const progressLabel = `[HLS] Encoding ${profile.name} (${profileIndex + 1} of ${activeProfiles.length})`;
             onProgress?.(progressLabel, 0);
             const profileDir = path.join(hlsTempDir, profile.name);
             await fs.mkdir(profileDir, { recursive: true });
@@ -251,6 +251,7 @@ export async function processUpload(file: UploadInput, onProgress?: (message: st
             await encoding;
             onProgress?.(progressLabel, 100);
             const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+            onProgress?.(`[HLS] Completed encoding ${profile.name} in ${elapsed}s.`, 100);
             console.log(`[HLS] Completed encoding ${profile.name} in ${elapsed}s.`);
           }
 
@@ -274,6 +275,7 @@ export async function processUpload(file: UploadInput, onProgress?: (message: st
           finalContentType = 'application/x-mpegURL';
         }
       } catch (err) {
+        onProgress?.('Video optimization could not finish. Saving the original video instead...');
         console.error('Error during video HLS compression, falling back to original video upload:', err);
         // Keep the staged original available for streaming to S3.
         isHls = false;

@@ -11,6 +11,7 @@ type Job = {
   error?: string;
   message?: string;
   percent?: number;
+  activity?: string[];
 };
 
 // One worker per Node process; shared by all route bundles.
@@ -47,16 +48,20 @@ export function getUploadJob(id: string) {
 
 export function runUpload(id: string, input: UploadInput): Promise<void> {
   const work = worker.tail.then(async () => {
+    const activity: string[] = ['Upload received. Processing started.'];
     worker.jobs.set(id, { status: 'processing', updatedAt: Date.now() });
     try {
       const result = await processUpload(input, (message, percent) => {
-        worker.jobs.set(id, { status: 'processing', updatedAt: Date.now(), message, percent });
+        if (activity.at(-1) !== message) activity.push(message);
+        worker.jobs.set(id, { status: 'processing', updatedAt: Date.now(), message, percent, activity: [...activity] });
       });
-      worker.jobs.set(id, { status: 'completed', updatedAt: Date.now(), result });
+      activity.push('Upload completed. Your file is ready.');
+      worker.jobs.set(id, { status: 'completed', updatedAt: Date.now(), result, activity });
     } catch (error) {
       console.error('Upload job failed:', id, error);
       worker.jobs.set(id, {
         status: 'failed', updatedAt: Date.now(),
+        activity: [...activity, 'Upload failed. Please see the error message for next steps.'],
         error: "We couldn't finish saving your file. Please try again. If this keeps happening, contact your IT team.",
       });
     } finally {
